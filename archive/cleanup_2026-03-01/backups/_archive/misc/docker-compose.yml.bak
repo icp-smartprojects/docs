@@ -1,0 +1,1103 @@
+services:
+  # ========== INFRASTRUCTURE ==========
+  postgres:
+    image: postgres:15-alpine
+    container_name: aurexis-postgres
+    environment:
+      POSTGRES_USER: aurexis_user
+      POSTGRES_PASSWORD: aurexis_secure_pass
+      POSTGRES_DB: aurexis_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aurexis_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: aurexis-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  auth-mongo:
+    image: mongo:6
+    container_name: aurexis-auth-mongo
+    ports:
+      - "27018:27017"  # host remap to avoid conflict
+    volumes:
+      - auth_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  auth-service:
+    build:
+      context: ./Back_End_Auth_System
+      dockerfile: Dockerfile
+      target: production
+    container_name: aurexis-auth-service
+    environment:
+      NODE_ENV: production
+      PORT: 5500
+      HOST: 0.0.0.0
+      MONGO_URI: mongodb://auth-mongo:27017/authdb
+      JWT_SECRET: dev-secret-key
+      GOOGLE_CLIENT_ID: dummy-google-client-id
+      GOOGLE_CLIENT_SECRET: dummy-google-client-secret
+      GOOGLE_CALLBACK_URL: http://localhost:5500/api/auth/google/callback
+      CLOUDINARY_CLOUD_NAME: dummy
+      CLOUDINARY_API_KEY: dummy
+      CLOUDINARY_API_SECRET: dummy
+      MAILGUN_API_KEY: dummy
+      MAILGUN_DOMAIN: example.com
+      RESEND_API_KEY: dummy
+      FROM_EMAIL: no-reply@example.com
+      QUOUTE_FROM_EMAIL: quotes@example.com
+      TRUSTED_IPS: 0.0.0.0/0
+      RATE_LIMIT_WINDOW_MS: 900000
+      RATE_LIMIT_MAX_REQUESTS: 200
+      SENSITIVE_OP_WINDOW_MS: 3600000
+      SENSITIVE_OP_MAX_REQUESTS: 50
+      PAYSTACK_SECRET_KEY: dummy
+      PAYSTACK_PUBLIC_KEY: dummy
+      FRONTEND_URL: http://localhost
+      WEBHOOK_URL: http://localhost/webhook
+      DEFAULT_FREE_PLAN_ID: free-plan
+      OPENWEATHER_API_KEY: dummy
+      GEMINI_API_KEY: dummy
+    ports:
+      - "5500:5500"
+    volumes:
+      - ./Back_End_Auth_System/logs:/app/logs
+      - ./Back_End_Auth_System/uploads:/app/uploads
+      - ./Back_End_Auth_System/temp:/app/temp
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5500/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - auth-mongo
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.12
+    container_name: aurexis-clickhouse
+    ports:
+      - "8124:8123"   # HTTP (host remap)
+      - "9001:9000"   # Native (host remap)
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== OBSERVABILITY STACK ==========
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aurexis-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: aurexis-jaeger
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: :9411
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:16686/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== FRONTEND ==========
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Empty → Vite falls back to relative URLs; nginx proxies /api/ to gateway
+        VITE_API_BASE_URL: ""
+        VITE_GATEWAY_URL: ""
+    container_name: aurexis-frontend
+    ports:
+      - "80:80"
+      - "3001:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      REACT_APP_JAEGER_URL: http://localhost:16686
+      NODE_ENV: development
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - gateway
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== CORE SERVICES ==========
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: aurexis-gateway
+    ports:
+      - "52051:52031"  # host remap to avoid conflict
+    environment:
+      ENVIRONMENT: development
+      JWT_SECRET: dev-secret-key
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: aurexis_user
+      POSTGRES_PASSWORD: aurexis_secure_pass
+      POSTGRES_DB: aurexis_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      AUTH_SERVICE_URL: http://auth-service:5500
+      INGESTION_SERVICE_URL: http://market-ingestion:52010
+      MARKET_INGESTION_URL: http://market-ingestion:52010
+      EVENT_BUS_URL: http://event-bus:52020
+      JAEGER_URL: http://jaeger:14268/api/traces
+      PROMETHEUS_URL: http://prometheus:9090
+      SECURITY_SERVICE_URL: http://security-core:55000
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:52031/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - jaeger
+      - prometheus
+      - auth-service
+      - security-core
+      - event-bus
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== PERCEPTION & MARKET DATA ==========
+  price-observer:
+    build:
+      context: ./price-observer
+      dockerfile: Dockerfile
+    container_name: aurexis-price-observer
+    ports:
+      - "52002:52002"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52002
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: aurexis_user
+      POSTGRES_PASSWORD: aurexis_secure_pass
+      POSTGRES_DB: aurexis_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      RUST_LOG: info
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:52002/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  market-ingestion:
+    build:
+      context: ./market-ingestion
+      dockerfile: Dockerfile
+    container_name: aurexis-market-ingestion
+    ports:
+      - "52024:52010"  # host remap to avoid conflict with shape-engine
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52010
+      HEALTH_PORT: 52010
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: aurexis_user
+      POSTGRES_PASSWORD: aurexis_secure_pass
+      POSTGRES_DB: aurexis_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: aurexis
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      WATCH_INBOX: "true"
+      ONTOLOGY_URL: http://ontology:52100
+      ONTOLOGY_TIMEOUT: "5.0"
+      ONTOLOGY_RETRIES: "2"
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - clickhouse
+      - ontology
+    volumes:
+      - ./market-ingestion/data:/app/data
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52010/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  perception:
+    build:
+      context: ./perception
+      dockerfile: Dockerfile
+    container_name: aurexis-perception
+    ports:
+      - "52012:52012"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52012
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      EVENT_BUS_WS_URL: ws://event-bus:52020
+      ONTOLOGY_URL: http://ontology:52100
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52012/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - ontology
+    volumes:
+      - ./shared:/app/shared:ro
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== CORE PROCESSING ENGINES ==========
+  meaning-engine:
+    build:
+      context: ./meaning-engine
+      dockerfile: Dockerfile
+    container_name: aurexis-meaning-engine
+    ports:
+      - "52003:52003"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52003
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: neo4j_password
+      NEO4J_DATABASE: meaning
+      EVENT_BUS_URL: http://event-bus:52020
+      KNOWLEDGE_GRAPH_URL: http://knowledge-graph:52015
+      SHAPE_ENGINE_URL: http://shape-engine:52010
+      MEMORY_URL: http://memory:52018
+      POLICY_ENGINE_URL: http://policy-engine:52032
+      ONTOLOGY_URL: http://ontology:52100
+      PERCEPTION_URL: http://perception:52012
+      MEANING_POLICY_STRATEGY: intraday
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      event-bus:
+        condition: service_healthy
+      knowledge-graph:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      ontology:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52003/health"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 8
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+    volumes:
+      - ./shared:/app/shared:ro
+      - meaning-engine-data:/app/data
+
+  reasoning-engine:
+    build:
+      context: ./reasoning-engine
+      dockerfile: Dockerfile
+    container_name: aurexis-reasoning-engine
+    ports:
+      - "52008:52008"
+    environment:
+      PORT: 52008
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52008
+      SERVICE_PORT: 52008
+      REASONING_PORT: 52008
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      KNOWLEDGE_GRAPH_URL: http://knowledge-graph:52015
+      POLICY_ENGINE_URL: http://policy-engine:52032
+      SHAPE_ENGINE_URL: http://shape-engine:52010
+      PERCEPTION_URL: http://perception:52012
+      ONTOLOGY_URL: http://ontology:52100
+      MEMORY_URL: http://memory:52018
+      SIMULATION_URL: http://simulation:52043
+      MEANING_ENGINE_URL: http://meaning-engine:52003
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - knowledge-graph
+      - ontology
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52008/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+    volumes:
+      - ./shared:/app/shared:ro
+
+  learning-engine:
+    build:
+      context: ./learning-engine
+      dockerfile: Dockerfile
+    container_name: aurexis-learning-engine
+    ports:
+      - "52004:52004"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52004
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      MEANING_ENGINE_URL: http://meaning-engine:52003
+      SHAPE_ENGINE_URL: http://shape-engine:52010
+      REASONING_ENGINE_URL: http://reasoning-engine:52008
+      POLICY_ENGINE_URL: http://policy-engine:52032
+      SIMULATION_ENGINE_URL: http://simulation:52043
+      MEMORY_URL: http://memory:52018
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: neo4j_password
+      NEO4J_DATABASE: neo4j
+      ONTOLOGY_URL: http://ontology:52100
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - meaning-engine
+      - neo4j
+      - ontology
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+    volumes:
+      - ./shared:/app/shared:ro
+      - learning-engine-data:/app/data
+
+  shape-engine:
+    build:
+      context: ./shape-engine
+      dockerfile: Dockerfile
+    container_name: aurexis-shape-engine
+    ports:
+      - "52010:52010"
+      - "52011:52011"
+    environment:
+      SERVICE_PORT: 52010
+      GRPC_PORT: 52011
+      DATABASE_URL: postgresql+asyncpg://aurexis_user:aurexis_secure_pass@postgres:5432/aurexis_db
+      REDIS_URL: redis://redis:6379/0
+      EVENT_BUS_URL: http://event-bus:52020
+      EVENT_BUS_TOPICS: '["candles","perception.events","price.ticks"]'
+      PERCEPTION_ENGINE_URL: http://perception:52012
+      MEANING_ENGINE_URL: http://meaning-engine:52003
+      LEARNING_ENGINE_URL: http://learning-engine:52004
+      TRACING_ENDPOINT: http://jaeger:14268/api/traces
+      ONTOLOGY_URL: http://ontology:52100
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52010/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - perception
+      - meaning-engine
+      - learning-engine
+      - ontology
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+    volumes:
+      - ./shared:/app/shared:ro
+
+  # ========== KNOWLEDGE & MEMORY SYSTEMS ==========
+  knowledge-graph:
+    build:
+      context: ./knowledge-graph
+      dockerfile: Dockerfile
+    container_name: aurexis-knowledge-graph
+    ports:
+      - "52015:52015"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52015
+      KG_STORAGE_PATH: /app/data/knowledge-graph
+      EVENT_BUS_URL: http://event-bus:52020
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: neo4j_password
+      NEO4J_DATABASE: neo4j
+    depends_on:
+      - event-bus
+      - neo4j
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52015/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    volumes:
+      - kg_data:/app/data/knowledge-graph
+      - ./shared:/app/shared:ro
+    networks:
+      - aurexis-network
+
+  memory:
+    build:
+      context: ./memory
+      dockerfile: Dockerfile
+    container_name: aurexis-memory
+    ports:
+      - "52018:52018"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52018
+      MEMORY_EVENTS_PATH: /app/data/memory/events.jsonl
+      EVENT_BUS_URL: http://event-bus:52020
+      ONTOLOGY_URL: http://ontology:52100
+      MEMORY_VALIDATE_ONTOLOGY: "true"
+      MEMORY_LOG_FILE: /app/logs/memory_service.log
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52018/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - redis
+      - event-bus
+      - ontology
+    volumes:
+      - memory_data:/app/data/memory
+      - ./shared:/app/shared:ro
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  core-brain:
+    build:
+      context: ./core-brain
+      dockerfile: Dockerfile
+    container_name: aurexis-core-brain
+    ports:
+      - "52040:52040"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52040
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MQ_REDIS_URL: redis://redis:6379
+      EVENT_BUS_URL: http://event-bus:52020
+      SERVICE_EVENT_BUS_URL: http://event-bus:52020
+      KNOWLEDGE_GRAPH_URL: http://knowledge-graph:52015
+      MEMORY_URL: http://memory:52018
+      SERVICE_ONTOLOGY_URL: http://ontology:52100
+      SERVICE_MEMORY_URL: http://memory:52018
+      SERVICE_KNOWLEDGE_GRAPH_URL: http://knowledge-graph:52015
+      SERVICE_PERCEPTION_URL: http://perception:52012
+      SERVICE_LANGUAGE_URL: http://language-intelligence:52006
+      SERVICE_REASONING_URL: http://reasoning-engine:52008
+      SERVICE_MEANING_URL: http://meaning-engine:52003
+      SERVICE_LEARNING_URL: http://learning-engine:52004
+      SERVICE_SHAPE_URL: http://shape-engine:52010
+      SERVICE_POLICY_URL: http://policy-engine:52032
+      SERVICE_SIMULATION_URL: http://simulation:52043
+      # Code-level aliases (workflow_orchestrator.py reads these)
+      CANDLE_URL: http://candle-constructor:52023
+      PERCEPTION_URL: http://perception:52012
+      SHAPE_URL: http://shape-engine:52010
+      MEANING_URL: http://meaning-engine:52003
+      REASONING_URL: http://reasoning-engine:52008
+      POLICY_URL: http://policy-engine:52032
+      LEARNING_URL: http://learning-engine:52004
+      SIMULATION_URL: http://simulation:52043
+      SERVICE_EXPLANATION_URL: http://explanation-engine:52005
+      SECURITY_SERVICE_URL: http://security-core:55000
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52040/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - knowledge-graph
+      - memory
+      - ontology
+      - perception
+      - meaning-engine
+      - reasoning-engine
+      - learning-engine
+      - simulation
+      - explanation-engine
+      - language-intelligence
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+    volumes:
+      - ./shared:/app/shared:ro
+
+  # ========== LANGUAGE & EXPLANATION ==========
+  language-intelligence:
+    build:
+      context: ./language-intelligence
+      dockerfile: Dockerfile
+    container_name: aurexis-language-intelligence
+    ports:
+      - "52006:52006"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52006
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      MEMORY_URL: http://memory:52018
+      KNOWLEDGE_GRAPH_URL: http://knowledge-graph:52015
+      EXPLANATION_ENGINE_URL: http://explanation-engine:52005
+      REASONING_ENGINE_URL: http://reasoning-engine:52008
+      POLICY_ENGINE_URL: http://policy-engine:52032
+      SIMULATION_ENGINE_URL: http://simulation:52043
+      MEANING_ENGINE_URL: http://meaning-engine:52003
+      ONTOLOGY_URL: http://ontology:52100
+      CORE_BRAIN_URL: http://core-brain:52040
+      # Code-level aliases (query_router.py reads these)
+      MEANING_URL: http://meaning-engine:52003
+      POLICY_URL: http://policy-engine:52032
+      SIMULATION_URL: http://simulation:52043
+      REASONING_URL: http://reasoning-engine:52008
+      EXPLANATION_URL: http://explanation-engine:52005
+      LANG_INTEL_LOG_FILE: /app/logs/language-intelligence.log
+    volumes:
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:52006/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - reasoning-engine
+      - policy-engine
+      - meaning-engine
+      - ontology
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  explanation-engine:
+    build:
+      context: ./explanation-engine
+      dockerfile: Dockerfile
+    container_name: aurexis-explanation-engine
+    ports:
+      - "52005:52005"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52005
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      CORE_BRAIN_URL: http://core-brain:52040
+      SEMANTIC_MEMORY_URL: http://memory:52018
+      KNOWLEDGE_GRAPH_URL: http://knowledge-graph:52015
+      LANGUAGE_INTELLIGENCE_URL: http://language-intelligence:52006
+      PERCEPTION_URL: http://perception:52012
+      SHAPE_ENGINE_URL: http://shape-engine:52010
+      MEANING_ENGINE_URL: http://meaning-engine:52003
+      SIMULATION_URL: http://simulation:52043
+      POLICY_ENGINE_URL: http://policy-engine:52032
+      LEARNING_ENGINE_URL: http://learning-engine:52004
+      REASONING_ENGINE_URL: http://reasoning-engine:52008
+      ONTOLOGY_URL: http://ontology:52100
+    volumes:
+      - explanation-data:/app/data
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:52005/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - ontology
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  policy-engine:
+    build:
+      context: ./policy-engine
+      dockerfile: Dockerfile
+    container_name: aurexis-policy-engine
+    ports:
+      - "52032:52032"
+    environment:
+      PORT: 52032
+      DEBUG: "false"
+      EVENT_BUS_URL: http://event-bus:52020
+      REASONING_ENGINE_URL: http://reasoning-engine:52008
+      ONTOLOGY_URL: http://ontology:52100
+      MEMORY_URL: http://memory:52018
+      SIMULATION_URL: http://simulation:52043
+      MEANING_ENGINE_URL: http://meaning-engine:52003
+    depends_on:
+      - event-bus
+      - ontology
+    volumes:
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:52032/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== INFRASTRUCTURE & UTILITIES ==========
+  event-bus:
+    build:
+      context: ./event-bus
+      dockerfile: Dockerfile
+    container_name: aurexis-event-bus
+    ports:
+      - "52020:52020"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52020
+      CONFIG_PATH: /app/config/config.yaml
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SCHEMA_REGISTRY_URL: http://schema-registry:52025
+      SECURITY_SERVICE_URL: http://security-core:55000
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:52020/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+  ontology:
+    build:
+      context: ./ontology
+      dockerfile: Dockerfile
+    container_name: aurexis-ontology
+    ports:
+      - "52100:52100"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52100
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52100/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./shared:/app/shared:ro
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  schema-registry:
+    build:
+      context: ./schema-registry
+      dockerfile: Dockerfile
+    container_name: aurexis-schema-registry
+    ports:
+      - "52025:52025"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52025
+      STORAGE_BACKEND: postgresql
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: aurexis_user
+      POSTGRES_PASSWORD: aurexis_secure_pass
+      POSTGRES_DB: aurexis_db
+      COMPATIBILITY_MODE: backward
+      POSTGRES_SSL_MODE: disable
+      PGSSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CONFIG_PATH: /app/config/config.yaml
+      ONTOLOGY_URL: http://ontology:52100
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:52025/api/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+      - ontology
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  candle-constructor:
+    build:
+      context: ./candle-constructor
+      dockerfile: Dockerfile
+    container_name: aurexis-candle-constructor
+    ports:
+      - "52023:52023"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 52023
+      HEALTH_PORT: 52023
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EVENT_BUS_URL: http://event-bus:52020
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: aurexis
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      DATA_DIR: /data
+      AUTO_INGEST: "false"
+      ONTOLOGY_URL: http://ontology:52100
+    depends_on:
+      - redis
+      - event-bus
+      - clickhouse
+      - market-ingestion
+      - ontology
+    volumes:
+      - ./market-ingestion/data:/data:ro
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52023/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  simulation:
+    build:
+      context: ./simulation
+      dockerfile: Dockerfile
+    container_name: aurexis-simulation
+    ports:
+      - "52043:52043"
+    environment:
+      SIM_HOST: 0.0.0.0
+      SIM_PORT: 52043
+      EVENT_BUS_URL: http://event-bus:52020
+      SIM_PG_HOST: postgres
+      SIM_PG_PORT: 5432
+      SIM_PG_DB: aurexis_db
+      SIM_PG_USER: aurexis_user
+      SIM_PG_PASSWORD: aurexis_secure_pass
+      SIM_CH_HOST: clickhouse
+      SIM_CH_PORT: 8123
+      SIM_CH_USER: default
+      SIM_CH_PASSWORD: ""
+      SIM_CH_DB: aurexis
+      SIM_ONTOLOGY_URL: http://ontology:52100/api/v1
+      SIM_SHAPE_URL: http://shape-engine:52010/api/v1
+      SIM_PERCEPTION_URL: http://perception:52012
+      SIM_POLICY_URL: http://policy-engine:52032
+      SIM_MEANING_URL: http://meaning-engine:52003
+      SIM_REASONING_URL: http://reasoning-engine:52008
+      SIM_POLICY_STRATEGY: intraday
+    depends_on:
+      - postgres
+      - redis
+      - event-bus
+      - clickhouse
+      - ontology
+      - shape-engine
+      - perception
+      - policy-engine
+      - meaning-engine
+    healthcheck:
+      test: ["CMD", "python", "./shared/utils/healthcheck.py", "http://localhost:52043/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+    volumes:
+      - ./shared:/app/shared:ro
+
+  topology-hub:
+    build:
+      context: ./topology-hub
+      dockerfile: Dockerfile
+    container_name: aurexis-topology-hub
+    ports:
+      - "52016:8080"  # host remap to avoid conflicts
+    environment:
+      PORT: 8080
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  topology-hub-express:
+    build:
+      context: ./topology-hub-express
+      dockerfile: Dockerfile
+    container_name: aurexis-topology-hub-express
+    ports:
+      - "52017:3000"  # host remap to avoid conflicts
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      GO_HUB_URL: http://topology-hub:8080
+      CORS_ORIGIN: "*"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - topology-hub
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== SECURITY CONTROL PLANE ==========
+  security-core:
+    build:
+      context: ./security
+      dockerfile: Dockerfile
+    container_name: aurexis-security-core
+    ports:
+      - "55000:55000"
+      - "55090:9090"
+    environment:
+      NODE_ENV: production
+      PORT: 55000
+      HOST: 0.0.0.0
+      ADMIN_TOKEN: aurexis-admin-token-2026
+      REQUIRE_AUTH: "false"
+      KEK_PROVIDER: local
+      KEK_BASE64: "c2VjdXJpdHktbWFzdGVyLWtleS1hdXJleGlzLTIwMjY="
+      AUDIT_ENABLED: "true"
+      AUDIT_DIR: /app/data/audit
+      AUDIT_FAIL_CLOSED: "true"
+      RATE_LIMIT_MAX: 300
+      WAF_ENABLED: "true"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: aurexis_user
+      POSTGRES_PASSWORD: aurexis_secure_pass
+      POSTGRES_DB: aurexis_security
+      LOG_LEVEL: info
+    volumes:
+      - security_audit_data:/app/data/audit
+      - security_keys_data:/app/data/keys
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const h=require('http');h.get('http://localhost:55000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+  # ========== GRAPH DATABASE ==========
+  neo4j:
+    image: neo4j:5
+    container_name: aurexis-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/neo4j_password
+      NEO4J_apoc_export_file_enabled: 'true'
+      NEO4J_apoc_import_file_enabled: 'true'
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/var/lib/neo4j/data
+      - neo4j_logs:/var/lib/neo4j/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - aurexis-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  auth_mongo_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  kg_data:
+    driver: local
+  memory_data:
+    driver: local
+  clickhouse_data:
+    driver: local
+  security_audit_data:
+    driver: local
+  security_keys_data:
+    driver: local
+  explanation-data:
+    driver: local
+  learning-engine-data:
+    driver: local
+  meaning-engine-data:
+    driver: local
+
+networks:
+  aurexis-network:
+    driver: bridge
+    name: aurexis-network

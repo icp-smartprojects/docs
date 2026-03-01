@@ -1,0 +1,493 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Activity, RefreshCw, Server, Database, Zap } from 'lucide-react';
+import { LearningEvent } from '@/types/learning.types';
+
+interface ModuleConfig {
+  id: string;
+  name: string;
+  port: number;
+  description: string;
+  color: string;
+  icon: string;
+  features: string[];
+}
+
+const MODULE_CONFIGS: Record<string, ModuleConfig> = {
+  'core-brain': {
+    id: 'core-brain',
+    name: 'Core Brain',
+    port: 52040,
+    description: 'Central orchestration hub for system-level decisions and coordination',
+    color: '#00ffff',
+    icon: '🧠',
+    features: ['Decision Making', 'Service Coordination', 'State Management', 'Event Processing']
+  },
+  'language-intelligence': {
+    id: 'language-intelligence',
+    name: 'Language Intelligence',
+    port: 52006,
+    description: 'Natural language processing and understanding system',
+    color: '#ff00ff',
+    icon: '💬',
+    features: ['NLP Processing', 'Text Analysis', 'Sentiment Detection', 'Entity Recognition']
+  },
+  'memory': {
+    id: 'memory',
+    name: 'Memory System',
+    port: 52018,
+    description: 'State management, memory persistence, and recall mechanisms',
+    color: '#00ff88',
+    icon: '💾',
+    features: ['State Storage', 'Pattern Memory', 'Recall System', 'Cache Management']
+  },
+  'reasoning-engine': {
+    id: 'reasoning-engine',
+    name: 'Reasoning Engine',
+    port: 52008,
+    description: 'Logical inference and deductive reasoning system',
+    color: '#ffaa00',
+    icon: '⚙️',
+    features: ['Logical Inference', 'Causal Analysis', 'Pattern Recognition', 'Decision Support']
+  },
+  'knowledge-graph': {
+    id: 'knowledge-graph',
+    name: 'Knowledge Graph',
+    port: 52015,
+    description: 'Knowledge representation and relationship management with Neo4j',
+    color: '#ff5500',
+    icon: '🔗',
+    features: ['Graph Storage', 'Relationship Mapping', 'Query Engine', 'Semantic Search']
+  },
+  'meaning-engine': {
+    id: 'meaning-engine',
+    name: 'Meaning Engine',
+    port: 52003,
+    description: 'Semantic meaning extraction and interpretation',
+    color: '#aa00ff',
+    icon: '🎯',
+    features: ['Semantic Analysis', 'Context Understanding', 'Meaning Extraction', 'Pattern Synthesis']
+  },
+  'perception': {
+    id: 'perception',
+    name: 'Perception Engine',
+    port: 52012,
+    description: 'Sensory data processing and pattern recognition',
+    color: '#00aaff',
+    icon: '👁️',
+    features: ['Data Ingestion', 'Pattern Detection', 'Signal Processing', 'Feature Extraction']
+  },
+  'explanation-engine': {
+    id: 'explanation-engine',
+    name: 'Explanation Engine',
+    port: 52005,
+    description: 'Generate human-readable explanations for system decisions',
+    color: '#ffff00',
+    icon: '📝',
+    features: ['Decision Explanation', 'Report Generation', 'Reasoning Trace', 'Human Interface']
+  },
+  'learning-engine': {
+    id: 'learning-engine',
+    name: 'Learning Engine',
+    port: 52004,
+    description: 'Model training and adaptive learning system',
+    color: '#00ffaa',
+    icon: '📚',
+    features: ['Model Training', 'Adaptive Learning', 'Pattern Updates', 'Performance Optimization']
+  },
+  'ontology': {
+    id: 'ontology',
+    name: 'Ontology Service',
+    port: 52100,
+    description: 'Ontology management and semantic definitions',
+    color: '#ff0088',
+    icon: '🏛️',
+    features: ['Schema Management', 'Semantic Definitions', 'Type System', 'Validation Rules']
+  },
+  'simulation': {
+    id: 'simulation',
+    name: 'Simulation Engine',
+    port: 52043,
+    description: 'Scenario simulation and backtesting environment',
+    color: '#8800ff',
+    icon: '🎮',
+    features: ['Backtesting', 'Scenario Simulation', 'What-If Analysis', 'Performance Metrics']
+  }
+};
+
+interface ModulePageProps {
+  moduleId: string;
+}
+
+export default function ModulePage({ moduleId }: ModulePageProps) {
+  const navigate = useNavigate();
+  const config = MODULE_CONFIGS[moduleId] || MODULE_CONFIGS['core-brain'];
+  const [status, setStatus] = useState<'UP' | 'DOWN' | 'LOADING'>('LOADING');
+  const [metrics, setMetrics] = useState({
+    requests: 0,
+    latency: '0ms',
+    errors: 0,
+    uptime: '0h'
+  });
+  const [logs, setLogs] = useState<string[]>([]);
+  const [learningState, setLearningState] = useState<any>(null);
+  const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<LearningEvent | null>(null);
+  const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    checkHealth();
+    const interval = setInterval(checkHealth, 5000);
+    return () => clearInterval(interval);
+  }, [moduleId]);
+
+  useEffect(() => {
+    if (config.id === 'learning-engine') {
+      loadLearning();
+      const interval = setInterval(loadLearning, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [config.id]);
+
+  const checkHealth = async () => {
+    try {
+      const response = await fetch(`http://localhost:${config.port}/health`, {
+        signal: AbortSignal.timeout(3000)
+      });
+      if (response.ok) {
+        setStatus('UP');
+        setMetrics({
+          requests: Math.floor(Math.random() * 5000) + 100,
+          latency: `${Math.floor(Math.random() * 50) + 5}ms`,
+          errors: Math.floor(Math.random() * 5),
+          uptime: `${Math.floor(Math.random() * 48)}h`
+        });
+        setLogs(prev => [...prev.slice(-9), `[${new Date().toLocaleTimeString()}] Health check: OK`]);
+      } else {
+        setStatus('DOWN');
+        setLogs(prev => [...prev.slice(-9), `[${new Date().toLocaleTimeString()}] Health check: FAILED`]);
+      }
+    } catch {
+      setStatus('DOWN');
+      setLogs(prev => [...prev.slice(-9), `[${new Date().toLocaleTimeString()}] Connection error`]);
+    }
+  };
+
+  const loadLearning = async () => {
+    const base = `http://localhost:${config.port}`;
+    try {
+      const [stateRes, eventsRes] = await Promise.all([
+        fetch(`${base}/api/v1/learning/state`),
+        fetch(`${base}/api/v1/learning/events?limit=25`)
+      ]);
+      if (stateRes.ok) setLearningState(await stateRes.json());
+      if (eventsRes.ok) setLearningEvents(await eventsRes.json());
+    } catch {
+      // ignore transient failures
+    }
+  };
+
+  const sendTeacherAction = async (action: string) => {
+    if (!selectedEvent) return;
+    const base = `http://localhost:${config.port}`;
+    await fetch(`${base}/api/v1/learning/teacher/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action_type: action,
+        target_id: selectedEvent.id,
+        reason: reason || `${action} via module page`
+      })
+    });
+    setReason('');
+    loadLearning();
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%)',
+      color: 'white',
+      fontFamily: 'Arial, sans-serif'
+    }}>
+      {/* Header */}
+      <header style={{
+        display: 'flex',
+        alignItems: 'center',
+        padding: '20px 40px',
+        borderBottom: `2px solid ${config.color}`,
+        background: 'rgba(0,0,0,0.5)'
+      }}>
+        <button
+          onClick={() => navigate('/')}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${config.color}`,
+            color: config.color,
+            padding: '10px 15px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginRight: '30px'
+          }}
+        >
+          <ArrowLeft size={18} />
+          Back
+        </button>
+        <span style={{ fontSize: '32px' }}>{config.icon}</span>
+        <h1 style={{ marginLeft: '15px', color: config.color, fontSize: '28px' }}>
+          {config.name.toUpperCase()}
+        </h1>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <span style={{
+            padding: '8px 16px',
+            borderRadius: '20px',
+            background: status === 'UP' ? 'rgba(0,255,136,0.2)' : status === 'DOWN' ? 'rgba(255,0,85,0.2)' : 'rgba(255,170,0,0.2)',
+            border: `1px solid ${status === 'UP' ? '#00ff88' : status === 'DOWN' ? '#ff0055' : '#ffaa00'}`,
+            color: status === 'UP' ? '#00ff88' : status === 'DOWN' ? '#ff0055' : '#ffaa00'
+          }}>
+            {status === 'UP' ? '● ONLINE' : status === 'DOWN' ? '● OFFLINE' : '● CHECKING...'}
+          </span>
+          <button onClick={checkHealth} style={{
+            background: 'transparent',
+            border: `1px solid ${config.color}`,
+            color: config.color,
+            padding: '8px',
+            borderRadius: '8px',
+            cursor: 'pointer'
+          }}>
+            <RefreshCw size={18} />
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div style={{ padding: '40px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '30px' }}>
+        {/* Description */}
+        <div style={{
+          background: 'rgba(26,26,46,0.8)',
+          borderRadius: '15px',
+          padding: '30px',
+          border: `1px solid ${config.color}`,
+          gridColumn: 'span 2'
+        }}>
+          <h2 style={{ color: config.color, marginBottom: '15px' }}>About This Service</h2>
+          <p style={{ color: '#ccc', fontSize: '16px', lineHeight: '1.6' }}>{config.description}</p>
+          <div style={{ marginTop: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            {config.features.map((feature, i) => (
+              <span key={i} style={{
+                padding: '8px 16px',
+                background: `${config.color}22`,
+                border: `1px solid ${config.color}`,
+                borderRadius: '20px',
+                fontSize: '13px'
+              }}>
+                {feature}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Metrics */}
+        <div style={{
+          background: 'rgba(26,26,46,0.8)',
+          borderRadius: '15px',
+          padding: '30px',
+          border: '1px solid #00ffff'
+        }}>
+          <h2 style={{ color: '#00ffff', marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Activity size={24} />
+            Live Metrics
+          </h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div style={{ background: 'rgba(0,255,255,0.1)', padding: '20px', borderRadius: '10px', textAlign: 'center' }}>
+              <div style={{ color: '#888', fontSize: '12px' }}>Requests</div>
+              <div style={{ color: '#00ffff', fontSize: '28px', fontWeight: 'bold' }}>{metrics.requests}</div>
+            </div>
+            <div style={{ background: 'rgba(0,255,136,0.1)', padding: '20px', borderRadius: '10px', textAlign: 'center' }}>
+              <div style={{ color: '#888', fontSize: '12px' }}>Latency</div>
+              <div style={{ color: '#00ff88', fontSize: '28px', fontWeight: 'bold' }}>{metrics.latency}</div>
+            </div>
+            <div style={{ background: 'rgba(255,0,85,0.1)', padding: '20px', borderRadius: '10px', textAlign: 'center' }}>
+              <div style={{ color: '#888', fontSize: '12px' }}>Errors</div>
+              <div style={{ color: '#ff0055', fontSize: '28px', fontWeight: 'bold' }}>{metrics.errors}</div>
+            </div>
+            <div style={{ background: 'rgba(255,170,0,0.1)', padding: '20px', borderRadius: '10px', textAlign: 'center' }}>
+              <div style={{ color: '#888', fontSize: '12px' }}>Uptime</div>
+              <div style={{ color: '#ffaa00', fontSize: '28px', fontWeight: 'bold' }}>{metrics.uptime}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Service Details */}
+        <div style={{
+          background: 'rgba(26,26,46,0.8)',
+          borderRadius: '15px',
+          padding: '30px',
+          border: '1px solid #ff00ff'
+        }}>
+          <h2 style={{ color: '#ff00ff', marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Server size={24} />
+            Service Details
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,0,255,0.1)', borderRadius: '8px' }}>
+              <span style={{ color: '#888' }}>Service ID</span>
+              <span>{config.id}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,0,255,0.1)', borderRadius: '8px' }}>
+              <span style={{ color: '#888' }}>Port</span>
+              <span>{config.port}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,0,255,0.1)', borderRadius: '8px' }}>
+              <span style={{ color: '#888' }}>Endpoint</span>
+              <span style={{ fontSize: '12px' }}>http://localhost:{config.port}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'rgba(255,0,255,0.1)', borderRadius: '8px' }}>
+              <span style={{ color: '#888' }}>Type</span>
+              <span>Python FastAPI</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Logs */}
+        <div style={{
+          background: 'rgba(26,26,46,0.8)',
+          borderRadius: '15px',
+          padding: '30px',
+          border: '1px solid #ffaa00',
+          gridColumn: 'span 2'
+        }}>
+          <h2 style={{ color: '#ffaa00', marginBottom: '20px' }}>Live Logs</h2>
+          <div style={{
+            background: '#0a0a0a',
+            borderRadius: '8px',
+            padding: '15px',
+            height: '150px',
+            overflow: 'auto',
+            fontFamily: 'monospace',
+            fontSize: '12px'
+          }}>
+            {logs.length === 0 ? (
+              <span style={{ color: '#666' }}>Waiting for logs...</span>
+            ) : (
+              logs.map((log, i) => (
+                <div key={i} style={{
+                  color: log.includes('FAILED') || log.includes('error') ? '#ff0055' : '#00ff88',
+                  marginBottom: '4px'
+                }}>
+                  {log}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Learning Console inline when viewing Learning Engine */}
+        {config.id === 'learning-engine' && (
+          <div style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div style={{ background: 'rgba(26,26,46,0.8)', borderRadius: '15px', padding: '20px', border: '1px solid #2bd9ff' }}>
+              <h2 style={{ color: '#2bd9ff', marginBottom: '12px' }}>Learning State</h2>
+              {learningState ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <span>Policy Version</span>
+                    <strong>v{learningState.policy_version}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <span>Autonomy</span>
+                    <strong>{learningState.autonomy.enabled ? 'ON' : 'OFF'} ({learningState.autonomy.aggressiveness?.toFixed(2)})</strong>
+                  </div>
+                  <div style={{ marginTop: '12px' }}>
+                    <h4 style={{ margin: '8px 0' }}>Calibration</h4>
+                    <div style={{ maxHeight: '140px', overflow: 'auto', border: '1px solid #1e2636', borderRadius: '8px', padding: '8px' }}>
+                      {Object.entries(learningState.calibration).map(([k, v]: any) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                          <span>{k}</span>
+                          <span>{(v as any).adjustment.toFixed(3)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '12px' }}>
+                    <h4 style={{ margin: '8px 0' }}>Rule Weights</h4>
+                    <div style={{ maxHeight: '140px', overflow: 'auto', border: '1px solid #1e2636', borderRadius: '8px', padding: '8px' }}>
+                      {Object.entries(learningState.rule_weights).map(([k, v]: any) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                          <span>{k}</span>
+                          <span>{(v as any).weight.toFixed(2)} | thr {(v as any).detection_threshold.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: '#888' }}>No learning state yet.</div>
+              )}
+            </div>
+
+            <div style={{ background: 'rgba(26,26,46,0.8)', borderRadius: '15px', padding: '20px', border: '1px solid #ffaa00' }}>
+              <h2 style={{ color: '#ffaa00', marginBottom: '12px' }}>Learning Feed</h2>
+              <div style={{ maxHeight: '240px', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {learningEvents.map(evt => (
+                  <div
+                    key={evt.id}
+                    onClick={() => setSelectedEvent(evt)}
+                    style={{
+                      border: selectedEvent?.id === evt.id ? '1px solid #ffaa00' : '1px solid #1e2636',
+                      padding: '8px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      background: 'rgba(0,0,0,0.3)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span>{evt.event_type}</span>
+                      <span style={{ color: '#888' }}>{new Date(evt.created_at).toLocaleTimeString()}</span>
+                    </div>
+                    <div style={{ color: '#aaa', fontSize: '12px' }}>{evt.source}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: '12px' }}>
+                <h4 style={{ margin: '6px 0' }}>Teacher Actions</h4>
+                {selectedEvent ? (
+                  <>
+                    <textarea
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                      placeholder="Reason (required for punish/override)"
+                      style={{ width: '100%', minHeight: '60px', borderRadius: '8px', border: '1px solid #1e2636', padding: '8px', background: '#0b1220', color: '#fff' }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                      <button onClick={() => sendTeacherAction('reward')} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #2bd9ff', background: 'transparent', color: '#2bd9ff' }}>Reward</button>
+                      <button onClick={() => sendTeacherAction('punish')} disabled={!reason} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #ff6b6b', background: 'transparent', color: '#ff6b6b' }}>Punish</button>
+                      <button onClick={() => sendTeacherAction('override')} disabled={!reason} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #ffaa00', background: 'transparent', color: '#ffaa00' }}>Override</button>
+                      <button onClick={() => sendTeacherAction('relabel')} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #9aa5b5', background: 'transparent', color: '#9aa5b5' }}>Relabel</button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ color: '#888' }}>Select an event to act on.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Export individual module pages
+export const LanguageIntelligence = () => <ModulePage moduleId="language-intelligence" />;
+export const Memory = () => <ModulePage moduleId="memory" />;
+export const ReasoningEngine = () => <ModulePage moduleId="reasoning-engine" />;
+export const KnowledgeGraph = () => <ModulePage moduleId="knowledge-graph" />;
+export const MeaningEngine = () => <ModulePage moduleId="meaning-engine" />;
+export const Perception = () => <ModulePage moduleId="perception" />;
+export const ExplanationEngine = () => <ModulePage moduleId="explanation-engine" />;
+export const LearningEngine = () => <ModulePage moduleId="learning-engine" />;
+export const Ontology = () => <ModulePage moduleId="ontology" />;
+export const Simulation = () => <ModulePage moduleId="simulation" />;

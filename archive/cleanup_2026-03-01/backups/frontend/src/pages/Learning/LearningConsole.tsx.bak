@@ -1,0 +1,291 @@
+import { useEffect, useMemo, useState } from 'react';
+import { learningEngineApi } from '@/services/api/learningEngineApi';
+import { AutonomyConfig, LearningEvent, LearningState } from '@/types/learning.types';
+import { STRUCTURE_TYPES, TIMEFRAMES } from '@/utils/constants';
+import AurexisChart from '@/components/AurexisChart/AurexisChart';
+import './LearningConsole.css';
+
+type PolicyEntry = { version: number; reason: string; created_at: string; is_active: boolean };
+
+const defaultAutonomy: AutonomyConfig = {
+  enabled: true,
+  allowed_shapes: ['FVG', 'OrderBlock', 'BOS'],
+  allowed_timeframes: ['M5', 'M15', 'H1'],
+  aggressiveness: 0.4,
+  version: 1,
+};
+
+export default function LearningConsole() {
+  const [autonomy, setAutonomy] = useState<AutonomyConfig>(defaultAutonomy);
+  const [events, setEvents] = useState<LearningEvent[]>([]);
+  const [state, setState] = useState<LearningState | null>(null);
+  const [policies, setPolicies] = useState<PolicyEntry[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<LearningEvent | null>(null);
+  const [reason, setReason] = useState('');
+
+  const policyDiff = useMemo(() => {
+    if (policies.length < 2) return null;
+    const [current, previous] = [policies[0], policies[1]];
+    return { current, previous };
+  }, [policies]);
+
+  const load = async () => {
+    const [aut, evt, st, hist] = await Promise.all([
+      learningEngineApi.getAutonomy().catch(() => defaultAutonomy),
+      learningEngineApi.listEvents({ limit: 50 }).catch(() => []),
+      learningEngineApi.getState().catch(() => null),
+      learningEngineApi.listPolicies().catch(() => []),
+    ]);
+    setAutonomy(aut);
+    setEvents(evt);
+    setState(st);
+    setPolicies(hist);
+  };
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const toggleShape = (shape: string) => {
+    const allowed = autonomy.allowed_shapes.includes(shape)
+      ? autonomy.allowed_shapes.filter((s) => s !== shape)
+      : [...autonomy.allowed_shapes, shape];
+    setAutonomy({ ...autonomy, allowed_shapes: allowed });
+  };
+
+  const toggleTimeframe = (tf: string) => {
+    const allowed = autonomy.allowed_timeframes.includes(tf)
+      ? autonomy.allowed_timeframes.filter((t) => t !== tf)
+      : [...autonomy.allowed_timeframes, tf];
+    setAutonomy({ ...autonomy, allowed_timeframes: allowed });
+  };
+
+  const saveAutonomy = async () => {
+    await learningEngineApi.setAutonomy(autonomy);
+    load();
+  };
+
+  const actOnSelection = async (action: 'reward' | 'punish' | 'override' | 'relabel') => {
+    if (!selectedEvent) return;
+    await learningEngineApi.teacherAction(action, {
+      target_id: selectedEvent.id,
+      reason: reason || `${action} via console`,
+    });
+    setReason('');
+    load();
+  };
+
+  return (
+    <div className="learning-console">
+      <header className="lc-header">
+        <div>
+          <h1>Learning Console</h1>
+          <p>Audit, calibrate, and direct the Learning Engine.</p>
+        </div>
+        <div className="lc-stats">
+          <div className="stat">
+            <span className="label">Policy</span>
+            <span className="value">v{state?.policy_version ?? '—'}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Events</span>
+            <span className="value">{events.length}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Last Snapshot</span>
+            <span className="value">{state?.last_snapshot || 'n/a'}</span>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Professional Chart with Sidebar Timeframes & Drawing Tools ── */}
+      <section className="lc-section lc-chart-section">
+        <div className="section-header">
+          <h2>Learning Vision — Live Candles</h2>
+        </div>
+        <AurexisChart
+          contextId="learning"
+          symbol="V25_1S"
+          defaultTimeframe="5m"
+          height={520}
+          showStack={true}
+          showInspector={true}
+        />
+      </section>
+
+      <section className="lc-section">
+        <div className="section-header">
+          <h2>Autonomy Controls</h2>
+          <button onClick={saveAutonomy}>Save</button>
+        </div>
+        <div className="autonomy-grid">
+          <div>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={autonomy.enabled}
+                onChange={(e) => setAutonomy({ ...autonomy, enabled: e.target.checked })}
+              />
+              Autonomy Enabled
+            </label>
+            <div className="slider">
+              <span>Aggressiveness: {autonomy.aggressiveness.toFixed(2)}</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={autonomy.aggressiveness}
+                onChange={(e) => setAutonomy({ ...autonomy, aggressiveness: Number(e.target.value) })}
+              />
+            </div>
+          </div>
+          <div>
+            <h4>Allowed Shapes</h4>
+            <div className="chips">
+              {STRUCTURE_TYPES.slice(0, 10).map((shape) => (
+                <button
+                  key={shape}
+                  className={autonomy.allowed_shapes.includes(shape) ? 'chip active' : 'chip'}
+                  onClick={() => toggleShape(shape)}
+                >
+                  {shape}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h4>Allowed Timeframes</h4>
+            <div className="chips">
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf}
+                  className={autonomy.allowed_timeframes.includes(tf) ? 'chip active' : 'chip'}
+                  onClick={() => toggleTimeframe(tf)}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="lc-section split">
+        <div className="panel">
+          <div className="section-header">
+            <h2>Live Learning Feed</h2>
+            <span className="meta">latest {events.length}</span>
+          </div>
+          <div className="feed">
+            {events.map((evt) => (
+              <div
+                key={evt.id}
+                className={`feed-item ${selectedEvent?.id === evt.id ? 'active' : ''}`}
+                onClick={() => setSelectedEvent(evt)}
+              >
+                <div className="feed-row">
+                  <span className="type">{evt.event_type}</span>
+                  <span className="time">{new Date(evt.created_at).toLocaleTimeString()}</span>
+                </div>
+                <div className="feed-meta">
+                  <span>source: {evt.source}</span>
+                  <span>v{evt.version}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="section-header">
+            <h2>Teacher Panel</h2>
+            <span className="meta">{selectedEvent ? selectedEvent.event_type : 'Select an event'}</span>
+          </div>
+          <div className="teacher-panel">
+            {selectedEvent ? (
+              <>
+                <pre className="payload">{JSON.stringify(selectedEvent.payload, null, 2)}</pre>
+                <textarea
+                  placeholder="Reason (required for punish/override)"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+                <div className="actions">
+                  <button onClick={() => actOnSelection('reward')}>Reward</button>
+                  <button className="warn" onClick={() => actOnSelection('punish')} disabled={!reason}>
+                    Punish
+                  </button>
+                  <button onClick={() => actOnSelection('override')} disabled={!reason}>
+                    Override
+                  </button>
+                  <button onClick={() => actOnSelection('relabel')}>Relabel</button>
+                </div>
+              </>
+            ) : (
+              <div className="empty">Pick an event from the feed to manage.</div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="lc-section">
+        <div className="section-header">
+          <h2>Learning Curves</h2>
+          <span className="meta">Calibration + invalidations</span>
+        </div>
+        <div className="grid">
+          <div className="card">
+            <h4>Calibration</h4>
+            {state ? (
+              Object.entries(state.calibration).map(([k, v]) => (
+                <div key={k} className="metric-row">
+                  <span>{k}</span>
+                  <span>{v.adjustment.toFixed(3)}</span>
+                </div>
+              ))
+            ) : (
+              <div className="empty">No calibration data</div>
+            )}
+          </div>
+          <div className="card">
+            <h4>Rule Weights</h4>
+            {state ? (
+              Object.entries(state.rule_weights).map(([k, v]) => (
+                <div key={k} className="metric-row">
+                  <span>{k}</span>
+                  <span>{v.weight.toFixed(2)} | thr {v.detection_threshold.toFixed(2)}</span>
+                </div>
+              ))
+            ) : (
+              <div className="empty">No rule weights</div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="lc-section">
+        <div className="section-header">
+          <h2>Policy Diff</h2>
+          <button onClick={() => learningEngineApi.createSnapshot('console').then(load)}>Snapshot</button>
+        </div>
+        {policyDiff ? (
+          <div className="diff">
+            <div>
+              <h4>Current v{policyDiff.current.version}</h4>
+              <p>{policyDiff.current.reason}</p>
+            </div>
+            <div>
+              <h4>Previous v{policyDiff.previous.version}</h4>
+              <p>{policyDiff.previous.reason}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="empty">Need at least two policy versions to diff.</div>
+        )}
+      </section>
+    </div>
+  );
+}

@@ -1,0 +1,344 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ServiceNode } from './ServiceNode';
+import { Connector } from './Connector';
+import { DetailPanel } from './DetailPanel';
+import { SystemState, DetectedAsset, subscribeToSystemState, generateMockSystemState } from '@/services/api/systemMapApi';
+import { computeAllPositions, getServiceName, getServiceDescription, getServiceShape } from './layoutEngine';
+import CommandLayout from '@/layouts/CommandLayout';
+import BackButton from '@/components/BackButton';
+import './SystemVisualization.css';
+
+const CANVAS_WIDTH = 1600;
+const CANVAS_HEIGHT = 1000;
+
+export const SystemVisualization: React.FC = () => {
+  const [systemState, setSystemState] = useState<SystemState | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [hoveredServiceId, setHoveredServiceId] = useState<string | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<DetectedAsset | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Compute service positions dynamically
+  const servicePositions = useMemo(() => computeAllPositions(CANVAS_WIDTH, CANVAS_HEIGHT), []);
+
+  // Subscribe to real-time system state
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+
+    const connectToSystem = async () => {
+      try {
+        // Try WebSocket first
+        unsubscribe = subscribeToSystemState(
+          (state) => {
+            setSystemState(state);
+            setIsLoading(false);
+            setError(null);
+          },
+          (err) => {
+            console.warn('WebSocket failed, using mock data:', err);
+            // Fallback: generate mock state
+            setSystemState(generateMockSystemState());
+            setIsLoading(false);
+          }
+        );
+      } catch (err) {
+        console.warn('Failed to connect to system state:', err);
+        // Fallback: generate mock state
+        setSystemState(generateMockSystemState());
+        setIsLoading(false);
+      }
+    };
+
+    connectToSystem();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  // Poll for updates every 2 seconds (fallback if WebSocket doesn't work)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!systemState) {
+        setSystemState(generateMockSystemState());
+        setIsLoading(false);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [systemState]);
+
+  if (isLoading) {
+    return (
+      <CommandLayout>
+      <div className="system-visualization-container loading">
+        <div className="loading-spinner">
+          <div className="spinner" />
+          <p>Initializing system map...</p>
+        </div>
+      </div>
+      </CommandLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <CommandLayout>
+      <div className="system-visualization-container error">
+        <div className="error-message">
+          <h2>Connection Error</h2>
+          <p>{error}</p>
+          <button onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      </div>
+      </CommandLayout>
+    );
+  }
+
+  if (!systemState) {
+    return (
+      <CommandLayout>
+      <div className="system-visualization-container error">
+        <div className="error-message">
+          <h2>System State Unavailable</h2>
+          <p>Could not load system state</p>
+        </div>
+      </div>
+      </CommandLayout>
+    );
+  }
+
+  const selectedService = systemState.services[selectedServiceId || ''];
+  const allServiceIds = Object.keys(systemState.services);
+
+  return (
+    <CommandLayout>
+    <BackButton label="Dashboard" to="/" />
+    <div className="system-visualization-container">
+      {/* Header with global metrics */}
+      <div className="visualization-header">
+        <div className="header-left">
+          <h1>System Neural Network</h1>
+          <p className="subtitle">{(import.meta.env.VITE_APP_NAME || 'Financial System')} Architecture</p>
+        </div>
+        <div className="header-metrics">
+          <div className="metric-item">
+            <span className="metric-label">System Health</span>
+            <span
+              className="metric-value"
+              style={{
+                color: systemState.globalHealth > 0.9 ? '#10b981' : systemState.globalHealth > 0.75 ? '#f59e0b' : '#ef4444',
+              }}
+            >
+              {(systemState.globalHealth * 100).toFixed(0)}%
+            </span>
+          </div>
+          <div className="metric-divider" />
+          <div className="metric-item">
+            <span className="metric-label">Decisions/sec</span>
+            <span className="metric-value">{systemState.globalDecisionRate}</span>
+          </div>
+          <div className="metric-divider" />
+          <div className="metric-item">
+            <span className="metric-label">Services</span>
+            <span className="metric-value">{allServiceIds.length}</span>
+          </div>
+          <div className="metric-divider" />
+          <div className="metric-item">
+            <span className="metric-label">Assets Detected</span>
+            <span className="metric-value">{systemState.assets.length}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main canvas area */}
+      <div className="canvas-wrapper">
+        <svg
+          className="system-canvas"
+          viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`}
+          preserveAspectRatio="xMidYMid meet"
+          style={{ width: '100%', height: 'auto', maxHeight: 'calc(100vh - 250px)' }}
+        >
+          <defs>
+            {/* Glow filter for selected nodes */}
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+              <feMerge>
+                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+
+            {/* Subtle background grid */}
+            <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse">
+              <path d="M 80 0 L 0 0 0 80" fill="none" stroke="#1e293b" strokeWidth="0.5" opacity="0.15" />
+            </pattern>
+          </defs>
+
+          {/* Background */}
+          <rect width={CANVAS_WIDTH} height={CANVAS_HEIGHT} fill="url(#grid)" />
+
+          {/* Render connectors (data flows) */}
+          <g className="connectors-layer">
+            {systemState.connectors.map((connector) => {
+              const fromPos = servicePositions[connector.from];
+              const toPos = servicePositions[connector.to];
+              if (!fromPos || !toPos) return null;
+
+              const isHighlighted =
+                selectedServiceId === connector.from ||
+                selectedServiceId === connector.to ||
+                hoveredServiceId === connector.from ||
+                hoveredServiceId === connector.to;
+
+              return (
+                <Connector
+                  key={`${connector.from}-${connector.to}`}
+                  from={fromPos}
+                  to={toPos}
+                  data={connector}
+                  isActive={connector.isActive}
+                  isHighlighted={isHighlighted}
+                />
+              );
+            })}
+          </g>
+
+          {/* Render service nodes */}
+          <g className="services-layer">
+            {allServiceIds.map((serviceId) => {
+              const service = systemState.services[serviceId];
+              const pos = servicePositions[serviceId];
+              if (!pos) return null;
+
+              const isSelected = selectedServiceId === serviceId;
+              const isHovered = hoveredServiceId === serviceId;
+              const shape = getServiceShape(serviceId);
+              const name = getServiceName(serviceId);
+
+              return (
+                <ServiceNode
+                  key={serviceId}
+                  serviceId={serviceId}
+                  name={name}
+                  shape={shape as any}
+                  status={service.status}
+                  health={service.health}
+                  latency={service.latency}
+                  eventsPerSec={service.eventsPerSec}
+                  currentTask={service.currentTask}
+                  x={pos.x}
+                  y={pos.y}
+                  isSelected={isSelected}
+                  isHovered={isHovered}
+                  onSelect={() => setSelectedServiceId(serviceId)}
+                  onHover={() => setHoveredServiceId(serviceId)}
+                  onHoverEnd={() => setHoveredServiceId(null)}
+                />
+              );
+            })}
+          </g>
+
+          {/* Render connecting lines from Core Brain (authority visualization) */}
+          <g className="authority-layer" opacity="0.15" pointerEvents="none">
+            {allServiceIds.map((serviceId) => {
+              if (serviceId === 'core-brain') return null;
+              const fromPos = servicePositions['core-brain'];
+              const toPos = servicePositions[serviceId];
+              if (!fromPos || !toPos) return null;
+
+              return (
+                <line
+                  key={`auth-${serviceId}`}
+                  x1={fromPos.x}
+                  y1={fromPos.y}
+                  x2={toPos.x}
+                  y2={toPos.y}
+                  stroke="#06b6d4"
+                  strokeWidth="1"
+                  strokeDasharray="4,4"
+                />
+              );
+            })}
+          </g>
+        </svg>
+
+        {/* Right assets panel */}
+        <div className="assets-panel">
+          <div className="panel-title">Detected Assets</div>
+          <div className="assets-list">
+            {systemState.assets.map((asset) => (
+              <motion.button
+                key={asset.symbol}
+                className={`asset-item ${selectedAsset?.symbol === asset.symbol ? 'selected' : ''}`}
+                onClick={() => setSelectedAsset(asset)}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <div className="asset-symbol">{asset.symbol}</div>
+                <div className={`asset-status ${asset.status}`}>{asset.status}</div>
+                <div className="asset-confidence">{(asset.confidence * 100).toFixed(0)}%</div>
+              </motion.button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Legend footer */}
+      <div className="visualization-footer">
+        <div className="legend">
+          <div className="legend-item">
+            <div className="legend-color operational" />
+            <span>Operational</span>
+          </div>
+          <div className="legend-item">
+            <div className="legend-color degraded" />
+            <span>Degraded</span>
+          </div>
+          <div className="legend-item">
+            <div className="legend-color blocked" />
+            <span>Blocked</span>
+          </div>
+          <div className="legend-item">
+            <div className="legend-color disconnected" />
+            <span>Disconnected</span>
+          </div>
+        </div>
+        <div className="timestamp">Last update: {new Date(systemState.timestamp).toLocaleTimeString()}</div>
+      </div>
+
+      {/* Detail panel (deep dive into service state) */}
+      <AnimatePresence>
+        {selectedService && selectedServiceId && (
+          <DetailPanel
+            service={{
+              id: selectedServiceId,
+              name: getServiceName(selectedServiceId),
+              description: getServiceDescription(selectedServiceId),
+              shape: getServiceShape(selectedServiceId),
+              position: servicePositions[selectedServiceId],
+              status: selectedService.status as 'operational' | 'degraded' | 'blocked',
+              metrics: {
+                health: selectedService.health,
+                latency: selectedService.latency,
+                throughput: selectedService.throughput,
+                errorRate: selectedService.errorRate,
+                decisionsPerSec: selectedService.eventsPerSec,
+                activeAssets: systemState.assets.length,
+                confidence: 0.85,
+                activeConnections: selectedService.activeConnections,
+              },
+              lastEventTimestamp: selectedService.lastUpdate,
+            }}
+            onClose={() => setSelectedServiceId(null)}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+    </CommandLayout>
+  );
+};
+
+export default SystemVisualization;

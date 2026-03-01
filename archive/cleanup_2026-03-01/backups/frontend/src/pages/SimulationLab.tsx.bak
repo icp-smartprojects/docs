@@ -1,0 +1,400 @@
+/**
+ * SIMULATION LAB
+ * Demo trading with simulation account
+ * Start/stop automation, fast-forward, real-time AI explanations
+ */
+import { useState, useEffect, useRef } from 'react';
+import {
+  Play,
+  Square,
+  FastForward,
+  ArrowUp,
+  ArrowDown,
+  RefreshCw,
+  MessageSquare,
+} from 'lucide-react';
+import CommandLayout from '@/layouts/CommandLayout';
+import BackButton from '@/components/BackButton';
+
+interface Trade {
+  id: number;
+  time: string;
+  type: 'BUY' | 'SELL';
+  symbol: string;
+  entry: number;
+  exit?: number;
+  profit?: number;
+  status: 'OPEN' | 'CLOSED';
+  reason: string;
+}
+
+interface SimulationState {
+  running: boolean;
+  speed: number;
+  balance: number;
+  equity: number;
+  openTrades: number;
+  totalTrades: number;
+  winRate: number;
+  pnl: number;
+}
+
+export default function SimulationLab() {
+  const [sim, setSim] = useState<SimulationState>({
+    running: false,
+    speed: 1,
+    balance: 10000,
+    equity: 10000,
+    openTrades: 0,
+    totalTrades: 0,
+    winRate: 0,
+    pnl: 0,
+  });
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [currentPrice, setCurrentPrice] = useState(1.2345);
+  const [aiExplaining, setAiExplaining] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const [tradeEvents, setTradeEvents] = useState<Array<{ time: string; msg: string; type: string }>>([]);
+  const typingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tradeCounter = useRef(0);
+  const winCount = useRef(0);
+
+  // Simulation loop
+  useEffect(() => {
+    if (!sim.running) return;
+
+    const interval = setInterval(() => {
+      // Update price
+      const delta = (Math.random() - 0.48) * 0.001 * sim.speed;
+      setCurrentPrice((p) => {
+        const newPrice = Math.max(0.5, p + delta);
+        return parseFloat(newPrice.toFixed(5));
+      });
+
+      // Random trade generation
+      if (Math.random() < 0.15 * sim.speed) {
+        const isBuy = Math.random() > 0.45;
+        const entry = currentPrice + (Math.random() - 0.5) * 0.001;
+        const newTrade: Trade = {
+          id: ++tradeCounter.current,
+          time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+          type: isBuy ? 'BUY' : 'SELL',
+          symbol: 'Volatility_25',
+          entry: parseFloat(entry.toFixed(5)),
+          status: 'OPEN',
+          reason: isBuy ? 'Bullish signal detected' : 'Bearish signal detected',
+        };
+        setTrades((prev) => [newTrade, ...prev]);
+        setTradeEvents((prev) => [{
+          time: newTrade.time,
+          msg: `${newTrade.type} ${newTrade.symbol} @ ${newTrade.entry.toFixed(5)} — ${newTrade.reason}`,
+          type: 'trade',
+        }, ...prev].slice(0, 100));
+        setSim((s) => ({ ...s, openTrades: s.openTrades + 1, totalTrades: s.totalTrades + 1 }));
+      }
+
+      // Close open trades randomly
+      setTrades((prev) => {
+        const updated = [...prev];
+        for (let i = 0; i < updated.length; i++) {
+          if (updated[i].status === 'OPEN' && Math.random() < 0.08 * sim.speed) {
+            const exit = currentPrice + (Math.random() - 0.5) * 0.0005;
+            const profit = updated[i].type === 'BUY'
+              ? (exit - updated[i].entry) * 10000
+              : (updated[i].entry - exit) * 10000;
+            const roundedProfit = parseFloat(profit.toFixed(2));
+            updated[i] = {
+              ...updated[i],
+              exit: parseFloat(exit.toFixed(5)),
+              profit: roundedProfit,
+              status: 'CLOSED',
+            };
+
+            if (roundedProfit > 0) winCount.current++;
+
+            setSim((s) => {
+              const newBalance = s.balance + roundedProfit;
+              const newPnl = s.pnl + roundedProfit;
+              const newTotalCompleted = prev.filter((t) => t.status === 'CLOSED').length + 1;
+              return {
+                ...s,
+                balance: parseFloat(newBalance.toFixed(2)),
+                equity: parseFloat(newBalance.toFixed(2)),
+                openTrades: Math.max(0, s.openTrades - 1),
+                pnl: parseFloat(newPnl.toFixed(2)),
+                winRate: newTotalCompleted > 0 ? parseFloat(((winCount.current / newTotalCompleted) * 100).toFixed(1)) : 0,
+              };
+            });
+
+            setTradeEvents((prev2) => [{
+              time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+              msg: `CLOSED ${updated[i].type} @ ${exit.toFixed(5)} | P&L: ${roundedProfit > 0 ? '+' : ''}${roundedProfit.toFixed(2)}`,
+              type: roundedProfit > 0 ? 'win' : 'loss',
+            }, ...prev2].slice(0, 100));
+          }
+        }
+        return updated;
+      });
+    }, 1000 / sim.speed);
+
+    return () => clearInterval(interval);
+  }, [sim.running, sim.speed, currentPrice]);
+
+  const setSpeed = (speed: number) => setSim((s) => ({ ...s, speed }));
+
+  const startSimulation = () => {
+    setSim((s) => ({ ...s, running: true }));
+    setTradeEvents((prev) => [{
+      time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      msg: `Simulation started at ${sim.speed}x speed`,
+      type: 'system',
+    }, ...prev]);
+  };
+
+  const stopSimulation = () => {
+    setSim((s) => ({ ...s, running: false }));
+    setTradeEvents((prev) => [{
+      time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      msg: 'Simulation stopped',
+      type: 'system',
+    }, ...prev]);
+  };
+
+  const resetSimulation = () => {
+    setSim({
+      running: false, speed: 1,
+      balance: 10000, equity: 10000,
+      openTrades: 0, totalTrades: 0,
+      winRate: 0, pnl: 0,
+    });
+    setTrades([]);
+    setTradeEvents([]);
+    winCount.current = 0;
+    tradeCounter.current = 0;
+  };
+
+  const requestExplanation = () => {
+    setAiExplaining(true);
+    const text = `Simulation Analysis Report\n\nCurrent Price: ${currentPrice.toFixed(5)}\nTotal Balance: $${sim.balance.toFixed(2)}\nSession P&L: ${sim.pnl >= 0 ? '+' : ''}$${sim.pnl.toFixed(2)}\nWin Rate: ${sim.winRate}%\nOpen Positions: ${sim.openTrades}\nTotal Trades: ${sim.totalTrades}\n\nThe system is currently ${sim.running ? 'actively trading' : 'paused'} at ${sim.speed}x speed. ${sim.pnl > 0 ? 'The session is profitable — the system\'s pattern recognition and mean-reversion strategies are performing well in current conditions.' : sim.pnl < 0 ? 'The session shows a drawdown — the system is experiencing difficulty with current market microstructure. Consider adjusting reward weights or reviewing the knowledge graph for pattern gaps.' : 'The session is break-even — the system is calibrating to market conditions.'}\n\nThe perception engine has processed ${sim.totalTrades} trade signals. Each decision integrates candlestick analysis, shape detection, topological mapping, and reward-weighted reasoning. The explanation engine provides real-time justification for every entry and exit.`;
+
+    setAiText('');
+    let i = 0;
+    if (typingRef.current) clearInterval(typingRef.current);
+    typingRef.current = setInterval(() => {
+      if (i < text.length) {
+        setAiText(text.slice(0, i + 1));
+        i++;
+      } else {
+        if (typingRef.current) clearInterval(typingRef.current);
+      }
+    }, 12);
+  };
+
+  const closeExplanation = () => {
+    setAiExplaining(false);
+    setAiText('');
+    if (typingRef.current) clearInterval(typingRef.current);
+  };
+
+  return (
+    <CommandLayout>
+      <BackButton label="Dashboard" to="/" />
+      <div style={{ marginBottom: '1.25rem' }}>
+        <h1 className="text-tactical" style={{ fontSize: '1.125rem', color: 'var(--mil-text-primary)', marginBottom: '0.25rem' }}>
+          Simulation Lab
+        </h1>
+        <p style={{ fontSize: '0.75rem', color: 'var(--mil-text-tertiary)' }}>
+          Demo trading · Automated execution · Fast-forward · Real-time AI analysis
+        </p>
+      </div>
+
+      {/* Controls */}
+      <div className="mil-card" style={{ marginBottom: '1.25rem' }}>
+        <div className="mil-card-body" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {!sim.running ? (
+            <button className="mil-btn mil-btn-primary mil-btn-lg" onClick={startSimulation}>
+              <Play size={16} /> Start Simulation
+            </button>
+          ) : (
+            <button className="mil-btn mil-btn-danger mil-btn-lg" onClick={stopSimulation}>
+              <Square size={16} /> Stop
+            </button>
+          )}
+
+          {/* Speed Controls */}
+          <div style={{ display: 'flex', gap: '0.25rem', marginLeft: '0.5rem' }}>
+            {[1, 2, 5, 10].map((spd) => (
+              <button
+                key={spd}
+                className={`mil-btn mil-btn-sm ${sim.speed === spd ? 'mil-btn-primary' : 'mil-btn-ghost'}`}
+                onClick={() => setSpeed(spd)}
+              >
+                {spd === 1 ? '1x' : `${spd}x`}
+                {spd > 1 && <FastForward size={10} />}
+              </button>
+            ))}
+          </div>
+
+          <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={resetSimulation}>
+            <RefreshCw size={12} /> Reset
+          </button>
+
+          <button className="mil-btn mil-btn-sm mil-btn-secondary" onClick={requestExplanation}>
+            <MessageSquare size={12} /> Analyze
+          </button>
+
+          {/* Current Price */}
+          <div style={{
+            marginLeft: 'auto',
+            padding: '0.25rem 0.875rem',
+            background: 'var(--mil-bg-primary)',
+            border: '1px solid var(--mil-border)',
+            borderRadius: 'var(--mil-radius-md)',
+          }}>
+            <div className="text-label-mil" style={{ marginBottom: '0.125rem' }}>Price</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '1.125rem', fontWeight: 700, color: 'var(--mil-cyan)' }}>
+              {currentPrice.toFixed(5)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Account Stats */}
+      <div className="mil-grid mil-grid-5" style={{ marginBottom: '1.25rem' }}>
+        <div className="mil-stat-card">
+          <span className="mil-stat-label">Balance</span>
+          <span className="mil-stat-value" style={{ color: 'var(--mil-text-primary)', fontSize: '1.125rem' }}>
+            ${sim.balance.toFixed(2)}
+          </span>
+        </div>
+        <div className="mil-stat-card">
+          <span className="mil-stat-label">Session P&L</span>
+          <span className="mil-stat-value" style={{ color: sim.pnl > 0 ? 'var(--mil-green)' : sim.pnl < 0 ? 'var(--mil-red)' : 'var(--mil-text-primary)', fontSize: '1.125rem' }}>
+            {sim.pnl >= 0 ? '+' : ''}{sim.pnl.toFixed(2)}
+          </span>
+        </div>
+        <div className="mil-stat-card">
+          <span className="mil-stat-label">Win Rate</span>
+          <span className="mil-stat-value" style={{ color: sim.winRate > 55 ? 'var(--mil-green)' : sim.winRate > 45 ? 'var(--mil-amber)' : 'var(--mil-red)' }}>
+            {sim.winRate > 0 ? `${sim.winRate}%` : '--'}
+          </span>
+        </div>
+        <div className="mil-stat-card">
+          <span className="mil-stat-label">Open Trades</span>
+          <span className="mil-stat-value">{sim.openTrades}</span>
+        </div>
+        <div className="mil-stat-card">
+          <span className="mil-stat-label">Total Trades</span>
+          <span className="mil-stat-value">{sim.totalTrades}</span>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '1.25rem' }}>
+        {/* Trade History */}
+        <div className="mil-card" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="mil-card-header">
+            <span className="mil-card-title">Trade History</span>
+            <span style={{ fontSize: '0.625rem', color: 'var(--mil-text-muted)' }}>{trades.length} trades</span>
+          </div>
+          <div className="mil-card-body" style={{ padding: 0, flex: 1, overflowY: 'auto', maxHeight: '400px' }}>
+            <table className="mil-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Type</th>
+                  <th>Entry</th>
+                  <th>Exit</th>
+                  <th>P&L</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.slice(0, 50).map((trade) => (
+                  <tr key={trade.id}>
+                    <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.6875rem' }}>{trade.time}</td>
+                    <td>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                        color: trade.type === 'BUY' ? 'var(--mil-green)' : 'var(--mil-red)',
+                        fontWeight: 600,
+                        fontSize: '0.6875rem',
+                      }}>
+                        {trade.type === 'BUY' ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+                        {trade.type}
+                      </span>
+                    </td>
+                    <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.6875rem' }}>{trade.entry.toFixed(5)}</td>
+                    <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.6875rem' }}>{trade.exit?.toFixed(5) || '--'}</td>
+                    <td style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.6875rem',
+                      fontWeight: 600,
+                      color: trade.profit && trade.profit > 0 ? 'var(--mil-green)' : trade.profit && trade.profit < 0 ? 'var(--mil-red)' : 'var(--mil-text-muted)',
+                    }}>
+                      {trade.profit !== undefined ? `${trade.profit > 0 ? '+' : ''}${trade.profit.toFixed(2)}` : '--'}
+                    </td>
+                    <td>
+                      <span className={`mil-badge ${trade.status === 'OPEN' ? 'mil-badge-info' : trade.profit && trade.profit > 0 ? 'mil-badge-online' : 'mil-badge-error'}`}>
+                        {trade.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Activity Log */}
+        <div className="mil-card" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="mil-card-header">
+            <span className="mil-card-title">Automation Log</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: sim.running ? 'var(--mil-green)' : 'var(--mil-text-muted)', animation: sim.running ? 'pulse-dot 2s infinite' : 'none' }} />
+              <span style={{ fontSize: '0.5625rem', color: 'var(--mil-text-muted)', textTransform: 'uppercase' }}>
+                {sim.running ? `${sim.speed}x` : 'Stopped'}
+              </span>
+            </div>
+          </div>
+          <div className="mil-log-viewer mil-scroll" style={{ flex: 1, maxHeight: '400px' }}>
+            {tradeEvents.map((evt, i) => (
+              <div key={i} className="mil-log-entry">
+                <span className="mil-log-time">{evt.time}</span>
+                <span className={`mil-log-level ${evt.type === 'win' ? 'info' : evt.type === 'loss' ? 'error' : evt.type === 'system' ? 'warn' : 'info'}`}>
+                  {evt.type === 'win' ? 'WIN' : evt.type === 'loss' ? 'LOSS' : evt.type === 'system' ? 'SYS' : 'TRADE'}
+                </span>
+                <span className="mil-log-msg">{evt.msg}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* AI Explanation Modal */}
+      {aiExplaining && (
+        <div className="mil-modal-overlay" onClick={closeExplanation}>
+          <div className="mil-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mil-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <MessageSquare size={16} style={{ color: 'var(--mil-cyan)' }} />
+                <span className="mil-card-title">Simulation Analysis</span>
+              </div>
+              <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={closeExplanation}>✕</button>
+            </div>
+            <div className="mil-modal-body">
+              <pre className="mil-ai-message" style={{ whiteSpace: 'pre-wrap', fontFamily: 'var(--font-din-1451)' }}>
+                {aiText}
+                <span className="mil-ai-cursor" />
+              </pre>
+            </div>
+            <div className="mil-modal-footer">
+              <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={closeExplanation}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </CommandLayout>
+  );
+}

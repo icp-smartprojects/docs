@@ -1,0 +1,1293 @@
+"""
+Learning Engine - Main Application
+
+Port: 52004
+
+The adaptive intelligence core of the cognitive system.
+"""
+
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+from dataclasses import dataclass
+from collections import deque, defaultdict
+import hashlib
+import uuid
+import os
+import httpx
+import asyncio
+import json
+
+from src.config.config import get_settings
+from src.utils.logger import get_logger
+from src.utils.errors import LearningEngineError
+
+# Import all learning modules
+from src.supervised.example_handler import ExampleHandler
+from src.supervised.annotation_learner import AnnotationLearner
+from src.supervised.belief_learner import BeliefLearner
+from src.supervised.few_shot_learner import FewShotLearner
+
+from src.reinforcement.reward_handler import RewardHandler
+from src.reinforcement.outcome_learner import OutcomeLearner
+from src.reinforcement.policy_updater import PolicyUpdater
+from src.reinforcement.belief_updater import BeliefUpdater as RLBeliefUpdater
+
+from src.punishment.punishment_handler import PunishmentHandler
+from src.punishment.confidence_adjuster import ConfidenceAdjuster
+from src.punishment.belief_adjuster import BeliefAdjuster
+from src.punishment.graph_updater import GraphUpdater
+
+from src.active.uncertainty_learner import UncertaintyLearner
+from src.active.query_generator import QueryGenerator
+from src.active.sample_selector import SampleSelector
+
+from src.meta.pattern_discoverer import PatternDiscoverer
+from src.meta.hypothesis_generator import HypothesisGenerator
+from src.meta.discovery_learner import DiscoveryLearner
+
+from src.models.example import Example
+from src.models.outcome import Outcome
+from src.models.learning_event import LearningEvent
+
+# Real learning loop (baby-learning feedback system)
+from src.supervised.learning_loop import (
+    LearningLoopOrchestrator,
+    FeedbackRecord,
+    FeedbackType as LoopFeedbackType,
+)
+
+settings = get_settings()
+logger = get_logger(__name__)
+
+EVENT_BUS_URL = os.getenv("EVENT_BUS_URL", settings.EVENT_BUS_URL).rstrip("/")
+SHAPE_ENGINE_URL = os.getenv("SHAPE_ENGINE_URL", settings.SHAPE_ENGINE_URL).rstrip("/")
+REASONING_ENGINE_URL = os.getenv("REASONING_ENGINE_URL", settings.REASONING_ENGINE_URL).rstrip("/")
+POLICY_ENGINE_URL = os.getenv("POLICY_ENGINE_URL", settings.POLICY_ENGINE_URL).rstrip("/")
+SIMULATION_ENGINE_URL = os.getenv("SIMULATION_ENGINE_URL", settings.SIMULATION_ENGINE_URL).rstrip("/")
+
+LEARNING_EVENT_TOPICS = [
+    t.strip()
+    for t in settings.LEARNING_EVENT_TOPICS.split(",")
+    if t.strip()
+]
+LEARNING_PUBLISH_ENABLED = bool(settings.LEARNING_PUBLISH_ENABLED)
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="Learning Engine",
+    description="Adaptive intelligence through multiple learning modalities",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize all learning components
+example_handler = ExampleHandler()
+annotation_learner = AnnotationLearner(example_handler)
+belief_learner = BeliefLearner(example_handler)
+few_shot_learner = FewShotLearner(example_handler, belief_learner)
+
+reward_handler = RewardHandler()
+outcome_learner = OutcomeLearner(reward_handler)
+policy_updater = PolicyUpdater()
+rl_belief_updater = RLBeliefUpdater()
+
+confidence_adjuster = ConfidenceAdjuster()
+belief_adjuster = BeliefAdjuster()
+graph_updater = GraphUpdater()
+
+punishment_handler = PunishmentHandler(
+    confidence_adjuster,
+    belief_adjuster,
+    graph_updater
+)
+
+uncertainty_learner = UncertaintyLearner()
+query_generator = QueryGenerator()
+sample_selector = SampleSelector()
+
+pattern_discoverer = PatternDiscoverer()
+hypothesis_generator = HypothesisGenerator()
+discovery_learner = DiscoveryLearner()
+
+# Real learning loop instance (persists in-memory, stateful)
+_learning_loop = LearningLoopOrchestrator(persistence_fn=None)
+
+logger.info("Learning Engine initialized with all modules")
+
+
+# ============================================================================
+# LEARNING STATE + AUDIT
+# ============================================================================
+
+TF_AUTHORITY = {
+    "1S": 1,
+    "2S": 1,
+    "1M": 2,
+    "2M": 3,
+    "3M": 4,
+    "5M": 5,
+    "15M": 6,
+    "30M": 7,
+    "1H": 8,
+    "4H": 9,
+    "1D": 10,
+    "1W": 11,
+}
+
+
+def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, value))
+
+
+def _config_hash(calibration: Dict[str, Any], version: int) -> str:
+    raw = json.dumps({"version": version, "calibration": calibration}, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _ensure_state():
+    if getattr(app.state, "learning_state_initialized", False):
+        return
+    app.state.learning_state_initialized = True
+    app.state.learning_frozen = False
+    app.state.freeze_reason = None
+    app.state.freeze_timestamp = None
+    app.state.policy_violation_count = 0
+    app.state.model_version = 1
+    app.state.model_history = []
+    app.state.calibration = {
+        "by_shape_type": {},
+        "by_timeframe": {},
+        "by_detector": {},
+    }
+    app.state.audit_log = deque(maxlen=settings.LEARNING_AUDIT_MAX)
+    app.state.outcome_window = deque(maxlen=settings.LEARNING_DRIFT_MIN_OUTCOMES)
+    app.state.baseline_success_rate = None
+
+
+def _record_audit(
+    event_type: str,
+    source: str,
+    payload: Dict[str, Any],
+    changes: Optional[Dict[str, Any]] = None,
+    evidence_ids: Optional[List[str]] = None,
+    version: Optional[int] = None,
+) -> Dict[str, Any]:
+    record = {
+        "record_id": f"aud_{uuid.uuid4().hex[:12]}",
+        "event_type": event_type,
+        "source": source,
+        "timestamp": datetime.utcnow().isoformat(),
+        "evidence_ids": evidence_ids or [],
+        "changes": changes or {},
+        "payload": payload,
+        "version": version if version is not None else app.state.model_version,
+        "config_hash": _config_hash(app.state.calibration, app.state.model_version),
+    }
+    app.state.audit_log.append(record)
+    return record
+
+
+async def _bump_version(reason: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    app.state.model_version += 1
+    snapshot = {
+        "version": app.state.model_version,
+        "timestamp": datetime.utcnow().isoformat(),
+        "reason": reason,
+        "changes": changes,
+        "calibration": json.loads(json.dumps(app.state.calibration, default=str)),
+        "config_hash": _config_hash(app.state.calibration, app.state.model_version),
+    }
+    app.state.model_history.append(snapshot)
+    # Publish feedback loop on every version bump
+    await _publish_feedback_loop()
+    return snapshot
+
+
+def _apply_delta(bucket: Dict[str, float], key: str, delta: float) -> Dict[str, float]:
+    max_delta = settings.LEARNING_MAX_PARAM_DELTA
+    delta = max(-max_delta, min(max_delta, delta))
+    old = float(bucket.get(key, 0.5))
+    new = _clamp(old + delta, 0.0, 1.0)
+    bucket[key] = new
+    return {"key": key, "old": old, "new": new, "delta": new - old}
+
+
+def _tf_weight(timeframe: Optional[str]) -> float:
+    if not timeframe:
+        return 1.0
+    tf = str(timeframe).upper()
+    return float(TF_AUTHORITY.get(tf, 1))
+
+
+async def _publish_learning_event(topic: str, payload: Dict[str, Any]) -> None:
+    if not EVENT_BUS_URL or not LEARNING_PUBLISH_ENABLED:
+        return
+    try:
+        import uuid as _uuid
+        event_id = str(_uuid.uuid4())
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{EVENT_BUS_URL}/api/v1/publish",
+                json={
+                    "topic": topic,
+                    "event_type": topic.upper().replace(".", "_"),
+                    "source": "learning-engine",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "correlation_id": payload.get("correlation_id", event_id),
+                    "causation_id": payload.get("causation_id", ""),
+                    "schema_version": "1.0.0",
+                    "payload": payload,
+                    "headers": {"source_service": "learning-engine"},
+                },
+            )
+    except Exception as exc:
+        logger.warning("learning_event_publish_failed", error=str(exc), topic=topic)
+
+
+async def _fetch_shape_details(shape_id: str) -> Optional[Dict[str, Any]]:
+    if not SHAPE_ENGINE_URL:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{SHAPE_ENGINE_URL}/api/v1/shapes/{shape_id}")
+            if resp.status_code >= 400:
+                return None
+            return resp.json()
+    except Exception:
+        return None
+
+
+def _update_drift_window(success_degree: float) -> None:
+    app.state.outcome_window.append(success_degree)
+    if len(app.state.outcome_window) < settings.LEARNING_DRIFT_MIN_OUTCOMES:
+        return
+    success_rate = sum(1 for s in app.state.outcome_window if s > 0.25) / len(app.state.outcome_window)
+    if app.state.baseline_success_rate is None:
+        app.state.baseline_success_rate = success_rate
+        return
+    if success_rate < settings.LEARNING_DRIFT_MIN_SUCCESS_RATE:
+        app.state.learning_frozen = True
+        app.state.freeze_reason = "success_rate_below_threshold"
+        app.state.freeze_timestamp = datetime.utcnow().isoformat()
+    elif (app.state.baseline_success_rate - success_rate) > settings.LEARNING_DRIFT_DROP:
+        app.state.learning_frozen = True
+        app.state.freeze_reason = "success_rate_drop"
+        app.state.freeze_timestamp = datetime.utcnow().isoformat()
+
+
+async def _apply_shape_signal(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    changes = {"shape": [], "timeframe": []}
+    if app.state.learning_frozen:
+        return {"status": "frozen", "changes": changes}
+
+    shape_id = payload.get("shape_id") or payload.get("id")
+    details = payload
+    if shape_id:
+        shape_details = await _fetch_shape_details(str(shape_id))
+        if shape_details:
+            details = {**details, **shape_details}
+
+    shape_type = str(details.get("shape_type") or "").upper()
+    timeframe = str(details.get("timeframe") or "").upper()
+
+    delta_map = {
+        "SHAPE_CONFIRMED": 0.04,
+        "SHAPE_TOUCHED": 0.01,
+        "SHAPE_UPDATED": 0.01,
+        "SHAPE_CREATED": 0.00,
+        "SHAPE_INVALIDATED": -0.06,
+        "SHAPE_SUPPRESSED": -0.05,
+        "SHAPE_EXPIRED": -0.03,
+        "SHAPE_DEDUPLICATED": -0.02,
+        "SHAPE_FEEDBACK_RECEIVED": 0.05,
+    }
+    base_delta = delta_map.get(event_type, 0.0)
+
+    # Feedback-specific adjustment
+    feedback_signal = payload.get("learning_signal")
+    if feedback_signal is not None:
+        try:
+            base_delta = float(feedback_signal) * 0.05
+        except Exception:
+            pass
+
+    weight = _tf_weight(timeframe)
+    base_delta = max(-settings.LEARNING_MAX_EVENT_DELTA, min(settings.LEARNING_MAX_EVENT_DELTA, base_delta))
+    delta = base_delta * (1.0 + (weight / 10.0))
+
+    if shape_type:
+        changes["shape"].append(_apply_delta(app.state.calibration["by_shape_type"], shape_type, delta))
+    if timeframe:
+        changes["timeframe"].append(_apply_delta(app.state.calibration["by_timeframe"], timeframe, delta))
+
+    return {"status": "updated", "changes": changes, "shape_type": shape_type, "timeframe": timeframe}
+
+
+def _apply_policy_violation(payload: Dict[str, Any]) -> None:
+    app.state.policy_violation_count += 1
+    if app.state.policy_violation_count >= settings.LEARNING_POLICY_VIOLATION_FREEZE:
+        app.state.learning_frozen = True
+        app.state.freeze_reason = "policy_violation_spike"
+        app.state.freeze_timestamp = datetime.utcnow().isoformat()
+
+
+async def _publish_feedback_loop() -> None:
+    """Publish calibration feedback to perception, meaning, and shape engines.
+
+    Emits three events every time the model version bumps:
+      - learning.thresholds  -> perception (detection sensitivity per detector)
+      - learning.calibration -> meaning engine (per-shape / per-timeframe weights)
+      - learning.validity    -> shape engine (strictness per shape type)
+    """
+    cal = app.state.calibration
+    version = app.state.model_version
+    ts = datetime.utcnow().isoformat()
+    correlation_id = f"feedback_{version}_{uuid.uuid4().hex[:8]}"
+
+    # --- 1. Thresholds for Perception ----------------------------------
+    # Translate per-detector calibration into detection thresholds.
+    # Higher calibration value -> the detector is performing well -> we can
+    # tighten the threshold (raise it).  Lower -> relax it.
+    detector_thresholds: Dict[str, float] = {}
+    for detector, cal_value in cal.get("by_detector", {}).items():
+        # Map calibration [0..1] to a threshold band [0.3 .. 0.9]
+        detector_thresholds[detector] = round(_clamp(0.3 + cal_value * 0.6, 0.3, 0.9), 4)
+
+    await _publish_learning_event("learning.thresholds", {
+        "version": version,
+        "timestamp": ts,
+        "correlation_id": correlation_id,
+        "thresholds": detector_thresholds,
+        "by_timeframe": {
+            tf: round(_clamp(0.3 + v * 0.6, 0.3, 0.9), 4)
+            for tf, v in cal.get("by_timeframe", {}).items()
+        },
+    })
+
+    # --- 2. Calibration for Meaning Engine -----------------------------
+    await _publish_learning_event("learning.calibration", {
+        "version": version,
+        "timestamp": ts,
+        "correlation_id": correlation_id,
+        "by_shape_type": cal.get("by_shape_type", {}),
+        "by_timeframe": cal.get("by_timeframe", {}),
+        "by_detector": cal.get("by_detector", {}),
+    })
+
+    # --- 3. Validity strictness for Shape Engine -----------------------
+    # Higher shape-type calibration -> the shape is reliable -> we can
+    # be stricter about what counts as valid.
+    shape_validity: Dict[str, float] = {}
+    for stype, cal_value in cal.get("by_shape_type", {}).items():
+        # Map [0..1] -> strictness [0.4 .. 0.95]
+        shape_validity[stype] = round(_clamp(0.4 + cal_value * 0.55, 0.4, 0.95), 4)
+
+    await _publish_learning_event("learning.validity", {
+        "version": version,
+        "timestamp": ts,
+        "correlation_id": correlation_id,
+        "shape_validity": shape_validity,
+        "by_timeframe": {
+            tf: round(_clamp(0.4 + v * 0.55, 0.4, 0.95), 4)
+            for tf, v in cal.get("by_timeframe", {}).items()
+        },
+    })
+
+    logger.info(
+        "feedback_loop_published",
+        extra={"version": version, "detectors": len(detector_thresholds), "shapes": len(shape_validity)},
+    )
+
+
+def _extract_simulation_score(payload: Dict[str, Any]) -> Optional[float]:
+    if not payload:
+        return None
+    inner = payload.get("payload") if isinstance(payload, dict) else None
+    if inner and isinstance(inner, dict):
+        payload = inner
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not result:
+        return None
+    branches = result.get("branches") or []
+    if not branches:
+        return None
+    branch = branches[0]
+    reward = float(branch.get("reward") or 0.0)
+    penalty = float(branch.get("penalty") or 0.0)
+    return max(-1.0, min(1.0, reward - penalty))
+
+
+async def ingest_learning_event(event_type: str, payload: Dict[str, Any], source: str = "event-bus") -> Dict[str, Any]:
+    _ensure_state()
+    changes: Dict[str, Any] = {}
+
+    if event_type.startswith("SHAPE_"):
+        changes = await _apply_shape_signal(event_type, payload)
+        if changes.get("status") == "updated":
+            snapshot = await _bump_version(reason=f"{event_type.lower()}_update", changes=changes)
+            await _publish_learning_event("learning.model_release", snapshot)
+            await _publish_learning_event("learning.updates", changes)
+
+    elif event_type == "simulation.outcomes":
+        score = _extract_simulation_score(payload)
+        if score is not None:
+            _update_drift_window(score)
+            if app.state.learning_frozen and app.state.freeze_reason:
+                await _publish_learning_event(
+                    "learning.freeze",
+                    {
+                        "reason": app.state.freeze_reason,
+                        "timestamp": app.state.freeze_timestamp,
+                    },
+                )
+        changes = {"simulation_score": score}
+
+    elif event_type == "reasoning.decisions":
+        # ----- Extract prediction record from reasoning decision -----
+        shape_type = str(payload.get("shape_type") or "").upper()
+        timeframe  = str(payload.get("timeframe") or "").upper()
+        bias       = payload.get("bias") or payload.get("direction") or "NEUTRAL"
+        confidence = float(payload.get("confidence") or payload.get("score") or 0.5)
+        decision_ts = payload.get("timestamp") or datetime.utcnow().isoformat()
+
+        prediction = {
+            "prediction_id": f"pred_{uuid.uuid4().hex[:12]}",
+            "shape_type": shape_type,
+            "timeframe": timeframe,
+            "bias": str(bias).upper(),
+            "confidence": _clamp(confidence),
+            "timestamp": decision_ts,
+            "source_event": payload.get("decision_id") or payload.get("id"),
+        }
+
+        # Store the latest prediction on app state for tracking
+        if not hasattr(app.state, "predictions"):
+            app.state.predictions = deque(maxlen=500)
+        app.state.predictions.append(prediction)
+
+        # Update calibration based on decision confidence
+        cal_changes: Dict[str, list] = {"shape": [], "timeframe": [], "detector": []}
+        if not app.state.learning_frozen:
+            # Positive confidence -> small positive nudge; low confidence -> negative
+            delta = (confidence - 0.5) * settings.LEARNING_RATE_REINFORCEMENT
+            weight = _tf_weight(timeframe)
+            delta = delta * (1.0 + (weight / 10.0))
+
+            if shape_type:
+                cal_changes["shape"].append(
+                    _apply_delta(app.state.calibration["by_shape_type"], shape_type, delta)
+                )
+            if timeframe:
+                cal_changes["timeframe"].append(
+                    _apply_delta(app.state.calibration["by_timeframe"], timeframe, delta)
+                )
+            detector = str(payload.get("detector") or "").upper()
+            if detector:
+                cal_changes["detector"].append(
+                    _apply_delta(app.state.calibration["by_detector"], detector, delta)
+                )
+
+            if any(cal_changes.values()):
+                snapshot = await _bump_version(
+                    reason="reasoning_decision_update",
+                    changes=cal_changes,
+                )
+                await _publish_learning_event("learning.model_release", snapshot)
+                await _publish_learning_event("learning.updates", cal_changes)
+
+        changes = {"prediction": prediction, **cal_changes}
+
+    elif event_type == "meaning.state":
+        changes = {"meaning_event": True}
+
+    elif event_type == "policy.violations":
+        _apply_policy_violation(payload)
+        changes = {"policy_violation_count": app.state.policy_violation_count}
+        if app.state.learning_frozen and app.state.freeze_reason:
+            await _publish_learning_event(
+                "learning.freeze",
+                {
+                    "reason": app.state.freeze_reason,
+                    "timestamp": app.state.freeze_timestamp,
+                },
+            )
+
+    record = _record_audit(
+        event_type=event_type,
+        source=source,
+        payload=payload,
+        changes=changes,
+    )
+    return record
+
+
+# ============================================================================
+# HEALTH CHECK
+# ============================================================================
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "learning-engine",
+        "port": settings.PORT,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness check - verifies event-bus if configured."""
+    checks = {}
+    targets = {
+        "event_bus": (EVENT_BUS_URL, "/health"),
+        "shape_engine": (SHAPE_ENGINE_URL, "/health"),
+        "meaning_engine": (settings.MEANING_ENGINE_URL, "/ready"),
+        "reasoning_engine": (REASONING_ENGINE_URL, "/ready"),
+        "policy_engine": (POLICY_ENGINE_URL, "/ready"),
+        "simulation": (SIMULATION_ENGINE_URL, "/ready"),
+    }
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        for name, (base, path) in targets.items():
+            if not base:
+                continue
+            try:
+                resp = await client.get(f"{base.rstrip('/')}{path}")
+                checks[name] = resp.status_code < 500
+            except Exception:
+                checks[name] = False
+    ready = all(checks.values()) if checks else True
+    if not ready:
+        return JSONResponse(status_code=503, content={"ready": False, "checks": checks})
+    return {"ready": True, "checks": checks}
+
+
+# ============================================================================
+# EVENT BUS CONSUMER (multi-topic)
+# ============================================================================
+
+async def _consume_topic(topic: str):
+    if not EVENT_BUS_URL:
+        return
+    client: httpx.AsyncClient = app.state.event_bus_client
+    url = f"{EVENT_BUS_URL}/api/v1/stream"
+    params = {"topic": topic}
+    while not app.state.stop_event.is_set():
+        try:
+            async with client.stream("GET", url, params=params) as resp:
+                if resp.status_code != 200:
+                    await asyncio.sleep(1.0)
+                    continue
+                async for line in resp.aiter_lines():
+                    if app.state.stop_event.is_set():
+                        break
+                    if not line or not line.startswith("data:"):
+                        continue
+                    raw = line.replace("data:", "", 1).strip()
+                    try:
+                        data = json.loads(raw)
+                        payload = data.get("payload") if isinstance(data, dict) else data
+                        state = app.state.topic_state.setdefault(topic, {"count": 0, "last_event": None})
+                        state["count"] += 1
+                        state["last_event"] = payload
+                        await ingest_learning_event(topic, payload, source="event-bus")
+                    except Exception:
+                        logger.debug("event_bus_parse_failed", extra={"topic": topic})
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(1.0)
+
+
+@app.on_event("startup")
+async def _startup_event_bus():
+    app.state.event_bus_client = httpx.AsyncClient(timeout=None)
+    app.state.stop_event = asyncio.Event()
+    app.state.topic_state = {}
+    _ensure_state()
+    if EVENT_BUS_URL:
+        app.state.event_tasks = [
+            asyncio.create_task(_consume_topic(topic)) for topic in LEARNING_EVENT_TOPICS
+        ]
+
+
+@app.on_event("shutdown")
+async def _shutdown_event_bus():
+    app.state.stop_event.set()
+    tasks = getattr(app.state, "event_tasks", [])
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    client = getattr(app.state, "event_bus_client", None)
+    if client:
+        await client.aclose()
+
+
+@app.get("/api/v1/simulation/outcomes")
+async def get_simulation_outcomes_state():
+    """Returns a summary of simulation outcomes received from event-bus."""
+    return getattr(app.state, "topic_state", {}).get("simulation.outcomes", {"count": 0, "last_event": None})
+
+
+# ============================================================================
+# SUPERVISED LEARNING ENDPOINTS
+# ============================================================================
+
+class LearningEventIn(BaseModel):
+    event_type: str
+    source: Optional[str] = "external"
+    payload: Dict[str, Any] = {}
+    evidence_ids: List[str] = []
+
+
+class FreezeRequest(BaseModel):
+    freeze: bool = True
+    reason: Optional[str] = None
+
+
+class RollbackRequest(BaseModel):
+    version: int
+
+
+@app.post("/api/v1/learning/events/ingest")
+async def ingest_event(event: LearningEventIn):
+    """Ingest generic learning events (shape/meaning/reasoning/simulation)."""
+    try:
+        _ensure_state()
+        record = await ingest_learning_event(
+            event_type=event.event_type,
+            payload=event.payload,
+            source=event.source or "external",
+        )
+        return {"status": "ok", "record": record}
+    except Exception as e:
+        logger.error(f"Error ingesting learning event: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/learning/audit")
+async def get_audit_log(limit: int = 100):
+    """Return recent audit records."""
+    _ensure_state()
+    records = list(app.state.audit_log)[-limit:]
+    return {"count": len(records), "records": records}
+
+
+@app.get("/api/v1/learning/calibration")
+async def get_calibration_state():
+    """Return calibration tables and drift status."""
+    _ensure_state()
+    return {
+        "version": app.state.model_version,
+        "frozen": app.state.learning_frozen,
+        "freeze_reason": app.state.freeze_reason,
+        "calibration": app.state.calibration,
+        "drift": {
+            "window": list(app.state.outcome_window),
+            "baseline_success_rate": app.state.baseline_success_rate,
+        },
+    }
+
+
+@app.get("/api/v1/learning/version")
+async def get_version_state():
+    """Return version history."""
+    _ensure_state()
+    return {
+        "current_version": app.state.model_version,
+        "history": app.state.model_history[-50:],
+        "config_hash": _config_hash(app.state.calibration, app.state.model_version),
+    }
+
+
+@app.post("/api/v1/learning/rollback")
+async def rollback_version(request: RollbackRequest):
+    """Rollback calibration state to a previous version."""
+    _ensure_state()
+    target = next((h for h in app.state.model_history if h["version"] == request.version), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Version not found")
+    app.state.calibration = json.loads(json.dumps(target["calibration"], default=str))
+    app.state.model_version = request.version
+    app.state.learning_frozen = True
+    app.state.freeze_reason = "rollback_applied"
+    app.state.freeze_timestamp = datetime.utcnow().isoformat()
+    record = _record_audit(
+        event_type="ROLLBACK_APPLIED",
+        source="api",
+        payload={"version": request.version},
+        changes={"frozen": True},
+    )
+    await _publish_learning_event("learning.rollback", record)
+    return {"status": "rolled_back", "version": request.version, "record": record}
+
+
+@app.post("/api/v1/learning/freeze")
+async def freeze_learning(req: FreezeRequest):
+    """Freeze or unfreeze learning updates."""
+    _ensure_state()
+    app.state.learning_frozen = bool(req.freeze)
+    app.state.freeze_reason = req.reason or ("manual_freeze" if req.freeze else None)
+    app.state.freeze_timestamp = datetime.utcnow().isoformat() if req.freeze else None
+    record = _record_audit(
+        event_type="FREEZE_TOGGLE",
+        source="api",
+        payload={"freeze": req.freeze, "reason": req.reason},
+        changes={"frozen": app.state.learning_frozen},
+    )
+    await _publish_learning_event("learning.freeze", record)
+    return {"status": "ok", "frozen": app.state.learning_frozen, "record": record}
+
+
+@app.get("/api/v1/learning/freeze")
+async def get_freeze_state():
+    _ensure_state()
+    return {
+        "frozen": app.state.learning_frozen,
+        "reason": app.state.freeze_reason,
+        "timestamp": app.state.freeze_timestamp,
+    }
+
+
+# ============================================================================
+# REAL BABY-LEARNING LOOP ENDPOINTS
+# ============================================================================
+
+class FeedbackIn(BaseModel):
+    """Ingest feedback for the real learning loop."""
+    shape_id: str
+    shape_type: str
+    feedback_type: str  # "accept", "reject", "adjust", "relabel"
+    symbol: str = ""
+    timeframe: str = ""
+    before_geometry: Optional[Dict[str, Any]] = None
+    after_geometry: Optional[Dict[str, Any]] = None
+    context_candle_ids: List[str] = []
+    reason: str = ""
+
+
+@app.post("/api/v1/learning/feedback")
+async def submit_feedback(fb: FeedbackIn):
+    """Submit accept/reject/adjust feedback → updates detector weights."""
+    try:
+        ft = LoopFeedbackType(fb.feedback_type.lower())
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid feedback_type '{fb.feedback_type}'. "
+                   f"Must be one of: accept, reject, adjust, relabel",
+        )
+
+    record = FeedbackRecord(
+        id=f"fb_{uuid.uuid4().hex[:12]}",
+        feedback_type=ft,
+        shape_id=fb.shape_id,
+        shape_type=fb.shape_type.upper(),
+        symbol=fb.symbol,
+        timeframe=fb.timeframe.upper(),
+        before_geometry=fb.before_geometry,
+        after_geometry=fb.after_geometry,
+        context_candle_ids=fb.context_candle_ids,
+        reason=fb.reason,
+    )
+    result = _learning_loop.ingest_feedback(record)
+
+    # Also nudge the inline calibration to keep both systems in sync
+    _ensure_state()
+    if not app.state.learning_frozen:
+        delta_map = {
+            "accept": 0.04,
+            "reject": -0.06,
+            "adjust": -0.02,
+            "relabel": -0.04,
+        }
+        delta = delta_map.get(fb.feedback_type.lower(), 0.0)
+        if fb.shape_type:
+            _apply_delta(app.state.calibration["by_shape_type"], fb.shape_type.upper(), delta)
+        if fb.timeframe:
+            _apply_delta(app.state.calibration["by_timeframe"], fb.timeframe.upper(), delta)
+        await _bump_version(
+            reason=f"feedback_{fb.feedback_type}",
+            changes={"feedback": result},
+        )
+
+    return {"status": "ok", "result": result}
+
+
+@app.get("/api/v1/learning/weights/{shape_type}/{timeframe}")
+async def get_weights(shape_type: str, timeframe: str):
+    """Get current detection weights for a shape type + timeframe pair."""
+    config = _learning_loop.get_detection_config(
+        shape_type.upper(), timeframe.upper(),
+    )
+    return {
+        "shape_type": shape_type.upper(),
+        "timeframe": timeframe.upper(),
+        "config": config,
+        "model_version": _learning_loop.state.model_version,
+    }
+
+
+@app.get("/api/v1/learning/report")
+async def get_learning_report():
+    """Get improvement report (first-half vs second-half acceptance rate)."""
+    return _learning_loop.get_improvement_report()
+
+
+@app.post("/api/v1/learning/snapshots/create")
+async def create_learning_snapshot(reason: str = "manual"):
+    """Create a snapshot of the current learning state."""
+    snap = _learning_loop.create_snapshot(reason=reason)
+    return snap
+
+
+@app.get("/api/v1/learning/state")
+async def get_learning_state():
+    """Get the full learning loop state (weights, counters, hash)."""
+    return _learning_loop.state.to_dict()
+
+
+@app.post("/api/v1/supervised/examples/add")
+async def add_example(example: Example):
+    """Add a labeled example"""
+    try:
+        example_handler.add_example(example)
+        return {"status": "success", "example_id": example.example_id}
+    except Exception as e:
+        logger.error(f"Error adding example: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/supervised/annotation/learn")
+async def learn_from_annotation(
+    concept_id: str,
+    annotation: Dict[str, Any],
+    is_correct: bool
+):
+    """Learn from user annotation"""
+    try:
+        event = annotation_learner.learn_from_annotation(
+            concept_id, annotation, is_correct
+        )
+        return {
+            "status": "success",
+            "event_id": event.event_id,
+            "belief_changes": [
+                {
+                    "concept": d.concept_id,
+                    "old_conf": d.old_confidence,
+                    "new_conf": d.new_confidence,
+                    "change": d.confidence_change
+                }
+                for d in event.belief_deltas
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error learning from annotation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/supervised/few-shot/learn")
+async def few_shot_learn(examples: List[Example]):
+    """Learn from few examples"""
+    try:
+        few_shot_learner.learn_from_examples(examples)
+        return {
+            "status": "success",
+            "num_examples": len(examples),
+            "generalization_rules": len(few_shot_learner.generalization_rules)
+        }
+    except Exception as e:
+        logger.error(f"Error in few-shot learning: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/supervised/few-shot/predict")
+async def few_shot_predict(instance: Dict[str, Any]):
+    """Predict using few-shot learned knowledge"""
+    try:
+        prediction = few_shot_learner.predict(instance)
+        return {
+            "prediction": prediction["predicted_concept"],
+            "confidence": prediction["confidence"],
+            "reasoning": prediction["reasoning"]
+        }
+    except Exception as e:
+        logger.error(f"Error in prediction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# REINFORCEMENT LEARNING ENDPOINTS
+# ============================================================================
+
+@app.post("/api/v1/reinforcement/outcome/learn")
+async def learn_from_outcome(outcome: Outcome):
+    """Learn from action outcome"""
+    try:
+        _ensure_state()
+        _update_drift_window(outcome.success_degree)
+        if app.state.learning_frozen and app.state.freeze_reason:
+            await _publish_learning_event(
+                "learning.freeze",
+                {
+                    "reason": app.state.freeze_reason,
+                    "timestamp": app.state.freeze_timestamp,
+                },
+            )
+
+        if app.state.learning_frozen:
+            record = _record_audit(
+                event_type="OUTCOME_INGESTED_FROZEN",
+                source="api",
+                payload=outcome.to_dict(),
+                changes={"frozen": True, "reason": app.state.freeze_reason},
+            )
+            return {
+                "status": "frozen",
+                "outcome_id": outcome.outcome_id,
+                "analysis": None,
+                "audit": record,
+                "reason": app.state.freeze_reason,
+            }
+
+        analysis = outcome_learner.learn_from_outcome(outcome)
+
+        # Update beliefs based on outcome
+        if outcome.is_success():
+            rl_belief_updater.update_from_outcome(outcome)
+
+        # Calibration updates per timeframe/shape_type
+        changes = {"timeframe": [], "shape": []}
+        timeframe = (outcome.context or {}).get("timeframe")
+        shape_type = (outcome.context or {}).get("shape_type")
+        delta = float(outcome.success_degree) * settings.LEARNING_RATE_REINFORCEMENT
+        if timeframe:
+            changes["timeframe"].append(
+                _apply_delta(app.state.calibration["by_timeframe"], str(timeframe).upper(), delta)
+            )
+        if shape_type:
+            changes["shape"].append(
+                _apply_delta(app.state.calibration["by_shape_type"], str(shape_type).upper(), delta)
+            )
+
+        if changes["timeframe"] or changes["shape"]:
+            snapshot = await _bump_version(reason="outcome_learning", changes=changes)
+            await _publish_learning_event("learning.model_release", snapshot)
+            await _publish_learning_event("learning.updates", changes)
+
+        record = _record_audit(
+            event_type="OUTCOME_LEARNED",
+            source="api",
+            payload=outcome.to_dict(),
+            changes=changes,
+        )
+
+        return {
+            "status": "success",
+            "outcome_id": outcome.outcome_id,
+            "analysis": analysis,
+            "audit": record,
+        }
+    except Exception as e:
+        logger.error(f"Error learning from outcome: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/reinforcement/reward")
+async def process_reward(
+    concepts: List[str],
+    reward_score: float,
+    context: Dict[str, Any]
+):
+    """Process reward for successful prediction"""
+    try:
+        reward_handler.process_reward(concepts, reward_score, context)
+        return {
+            "status": "success",
+            "concepts_rewarded": len(concepts),
+            "reward_score": reward_score
+        }
+    except Exception as e:
+        logger.error(f"Error processing reward: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/reinforcement/policy/recommend")
+async def recommend_action(context: str):
+    """Get action recommendation based on learned policy"""
+    try:
+        action = policy_updater.recommend_action(context)
+        return {
+            "recommended_action": action["action"],
+            "confidence": action["confidence"],
+            "reasoning": action["reasoning"]
+        }
+    except Exception as e:
+        logger.error(f"Error recommending action: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# PUNISHMENT & CORRECTION ENDPOINTS
+# ============================================================================
+
+@app.post("/api/v1/punishment/apply")
+async def apply_punishment(outcome: Outcome):
+    """Apply punishment for failed prediction"""
+    try:
+        result = punishment_handler.apply_punishment(outcome)
+        return {
+            "status": "success",
+            "outcome_id": outcome.outcome_id,
+            "concepts_punished": len(result["concepts_punished"]),
+            "confidence_reductions": result["confidence_reductions"],
+            "graph_updates": len(result["graph_updates"]),
+            "counterfactual": result["counterfactual"]
+        }
+    except Exception as e:
+        logger.error(f"Error applying punishment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/punishment/failures/{concept_id}")
+async def get_failure_history(concept_id: str):
+    """Get failure history for a concept"""
+    try:
+        failures = confidence_adjuster.get_failure_count(concept_id)
+        return {
+            "concept_id": concept_id,
+            "failure_count": failures,
+            "current_confidence": confidence_adjuster.get_confidence(concept_id)
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving failure history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# ACTIVE LEARNING ENDPOINTS
+# ============================================================================
+
+@app.post("/api/v1/active/uncertainty/detect")
+async def detect_uncertainty(
+    prediction_scores: Dict[str, float],
+    context: Dict[str, Any]
+):
+    """Detect if current situation is uncertain"""
+    try:
+        situation = uncertainty_learner.detect_uncertainty(
+            prediction_scores, context
+        )
+        
+        if situation:
+            # Generate query to resolve uncertainty
+            query = query_generator.generate_query(situation)
+            
+            return {
+                "uncertain": True,
+                "uncertainty_score": situation.uncertainty_score,
+                "conflicting_concepts": situation.conflicting_concepts,
+                "query": {
+                    "id": query.query_id,
+                    "question": query.question,
+                    "options": query.options
+                }
+            }
+        else:
+            return {"uncertain": False}
+    
+    except Exception as e:
+        logger.error(f"Error detecting uncertainty: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/active/query/answer")
+async def answer_query(query_id: str, answer: str):
+    """Answer an active learning query"""
+    try:
+        success = query_generator.answer_query(query_id, answer)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Query not found")
+        
+        return {"status": "success", "query_id": query_id}
+    
+    except Exception as e:
+        logger.error(f"Error answering query: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/active/samples/select")
+async def select_informative_samples(
+    candidate_samples: List[Example],
+    current_examples: List[Example],
+    num_to_select: int = 5
+):
+    """Select most informative samples"""
+    try:
+        selected = sample_selector.select_most_informative(
+            candidate_samples, current_examples, num_to_select
+        )
+        
+        return {
+            "selected_samples": [ex.example_id for ex in selected],
+            "num_selected": len(selected)
+        }
+    except Exception as e:
+        logger.error(f"Error selecting samples: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# META LEARNING ENDPOINTS
+# ============================================================================
+
+@app.post("/api/v1/meta/discover")
+async def run_pattern_discovery(examples: List[Example]):
+    """Run autonomous pattern discovery"""
+    try:
+        patterns = pattern_discoverer.discover_patterns(examples)
+        
+        return {
+            "patterns_discovered": len(patterns),
+            "patterns": [
+                {
+                    "id": p.pattern_id,
+                    "name": p.name,
+                    "description": p.description,
+                    "support_count": p.support_count,
+                    "confidence": p.confidence
+                }
+                for p in patterns
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error in pattern discovery: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/meta/discovery-cycle")
+async def run_discovery_cycle(
+    examples: List[Example],
+    outcomes: List[Outcome]
+):
+    """Run complete discovery cycle"""
+    try:
+        results = discovery_learner.run_discovery_cycle(examples, outcomes)
+        return results
+    except Exception as e:
+        logger.error(f"Error in discovery cycle: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/meta/validated-knowledge")
+async def get_validated_knowledge():
+    """Get all validated discovered knowledge"""
+    try:
+        knowledge = discovery_learner.get_validated_knowledge()
+        return knowledge
+    except Exception as e:
+        logger.error(f"Error retrieving validated knowledge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# STATISTICS & MONITORING
+# ============================================================================
+
+@app.get("/api/v1/stats/all")
+async def get_all_statistics():
+    """Get statistics from all learning modules"""
+    try:
+        _ensure_state()
+        return {
+            "supervised": {
+                "examples": example_handler.get_statistics(),
+                "beliefs": belief_learner.get_statistics(),
+                "few_shot": few_shot_learner.get_statistics()
+            },
+            "reinforcement": {
+                "rewards": reward_handler.get_statistics(),
+                "outcomes": outcome_learner.get_statistics(),
+                "policies": policy_updater.get_statistics()
+            },
+            "punishment": {
+                "confidence": confidence_adjuster.get_statistics(),
+                "beliefs": belief_adjuster.get_statistics(),
+                "graph": graph_updater.get_statistics()
+            },
+            "active": {
+                "uncertainty": uncertainty_learner.get_statistics(),
+                "queries": query_generator.get_statistics(),
+                "samples": sample_selector.get_statistics()
+            },
+            "meta": {
+                "discovery": discovery_learner.get_statistics()
+            },
+            "system": {
+                "version": app.state.model_version,
+                "frozen": app.state.learning_frozen,
+                "freeze_reason": app.state.freeze_reason,
+                "policy_violation_count": app.state.policy_violation_count,
+                "calibration": app.state.calibration,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# ERROR HANDLERS
+# ============================================================================
+
+@app.exception_handler(LearningEngineError)
+async def learning_engine_error_handler(request, exc):
+    """Handle learning engine errors"""
+    logger.error(f"Learning engine error: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)}
+    )
+
+
+# ============================================================================
+# STARTUP/SHUTDOWN
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup event"""
+    _ensure_state()
+    logger.info(f"Learning Engine starting on port {settings.PORT}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Shutdown event"""
+    logger.info("Learning Engine shutting down")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=settings.PORT,
+        reload=settings.RELOAD
+    )

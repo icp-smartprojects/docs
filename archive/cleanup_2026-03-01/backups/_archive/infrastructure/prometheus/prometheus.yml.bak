@@ -1,0 +1,108 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # ── Core Infrastructure ──────────────────────────────────────
+  - job_name: 'aurexis-gateway'
+    static_configs:
+      - targets: ['gateway:52031']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-security'
+    static_configs:
+      - targets: ['security-core:9090']
+
+  - job_name: 'aurexis-event-bus'
+    static_configs:
+      - targets: ['event-bus:52020']
+    metrics_path: '/metrics'
+
+  # ── Cognitive Pipeline ───────────────────────────────────────
+  - job_name: 'aurexis-market-ingestion'
+    static_configs:
+      - targets: ['market-ingestion:52024']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-candle-constructor'
+    static_configs:
+      - targets: ['candle-constructor:52023']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-shape-engine'
+    static_configs:
+      - targets: ['shape-engine:52010']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-perception'
+    static_configs:
+      - targets: ['perception:52012']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-meaning-engine'
+    static_configs:
+      - targets: ['meaning-engine:52003']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-reasoning-engine'
+    static_configs:
+      - targets: ['reasoning-engine:52008']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-core-brain'
+    static_configs:
+      - targets: ['core-brain:52040']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-explanation-engine'
+    static_configs:
+      - targets: ['explanation-engine:52005']
+    metrics_path: '/metrics'
+
+  # ── Knowledge & Learning ─────────────────────────────────────
+  - job_name: 'aurexis-ontology'
+    static_configs:
+      - targets: ['ontology:52100']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-knowledge-graph'
+    static_configs:
+      - targets: ['knowledge-graph:52009']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-learning-engine'
+    static_configs:
+      - targets: ['learning-engine:52004']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-memory'
+    static_configs:
+      - targets: ['memory:52007']
+    metrics_path: '/metrics'
+
+  # ── Governance ───────────────────────────────────────────────
+  - job_name: 'aurexis-policy-engine'
+    static_configs:
+      - targets: ['policy-engine:52032']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-simulation'
+    static_configs:
+      - targets: ['simulation:52050']
+    metrics_path: '/metrics'
+
+  # ── Observation ──────────────────────────────────────────────
+  - job_name: 'aurexis-price-observer'
+    static_configs:
+      - targets: ['price-observer:52002']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-language-intelligence'
+    static_configs:
+      - targets: ['language-intelligence:52006']
+    metrics_path: '/metrics'
+
+  - job_name: 'aurexis-topology-hub'
+    static_configs:
+      - targets: ['topology-hub:52060']
+    metrics_path: '/metrics'

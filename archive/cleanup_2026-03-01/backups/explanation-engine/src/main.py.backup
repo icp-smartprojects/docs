@@ -1,0 +1,440 @@
+"""
+Explanation-Engine Main Service
+FastAPI entry point with all API endpoints
+"""
+
+import time
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional
+
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from prometheus_client import Counter, Histogram, generate_latest
+from pydantic import BaseModel, Field
+
+from .causal import BeliefChainBuilder, CausalExplainer, ChainBuilder
+from .config import get_settings
+from .generation import BeliefExplainer, ContextBuilder, ExplanationGenerator
+from .models import Explanation
+from .natural_language import EvidenceNarrator, NLGEngine, StyleAdapter, TextBuilder
+from .templates import TemplateLoader, TemplateManager
+from .utils import (
+    ExplanationEngineError,
+    get_logger,
+    log_service_ready,
+    log_service_start,
+    setup_logging,
+)
+from .visualization import GraphRenderer, VisualExplainer
+
+# Initialize settings and logging
+settings = get_settings()
+setup_logging(settings.log_level, settings.json_logs)
+logger = get_logger(__name__)
+
+# Prometheus metrics
+request_counter = Counter(
+    "explanation_requests_total",
+    "Total explanation requests",
+    ["endpoint", "status"]
+)
+request_latency = Histogram(
+    "explanation_latency_seconds",
+    "Explanation generation latency",
+    ["endpoint"]
+)
+
+
+# Request/Response Models
+class ExplainRequest(BaseModel):
+    """Request model for explanation generation"""
+    decision_id: str = Field(..., description="Decision ID to explain")
+    style: str = Field(default="standard", description="Explanation style")
+    include_visuals: bool = Field(default=False, description="Include visualization payload")
+
+
+class ExplainResponse(BaseModel):
+    """Response model for explanation"""
+    explanation: Dict[str, Any]
+    natural_language: str
+    visual_payload: Optional[Dict[str, Any]] = None
+    trace_ids: List[str]
+    generation_time_ms: float
+
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+    status: str
+    service: str
+    version: str
+    timestamp: float
+
+
+# Lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage service lifecycle"""
+    start_time = time.time()
+    
+    # Startup
+    log_service_start(
+        settings.service_name,
+        settings.service_port,
+        settings.model_dump()
+    )
+    
+    # Initialize components
+    app.state.chain_builder = ChainBuilder()
+    app.state.belief_chain_builder = BeliefChainBuilder()
+    app.state.causal_explainer = CausalExplainer()
+    app.state.belief_explainer = BeliefExplainer()
+    
+    # Initialize context builder
+    app.state.context_builder = ContextBuilder(
+        semantic_memory_url=settings.semantic_memory_url,
+        knowledge_graph_url=settings.knowledge_graph_url,
+        core_brain_url=settings.core_brain_url,
+        timeout_seconds=settings.explanation_timeout_seconds,
+    )
+    
+    # Initialize explanation generator
+    app.state.explanation_generator = ExplanationGenerator(
+        chain_builder=app.state.chain_builder,
+        belief_chain_builder=app.state.belief_chain_builder,
+        causal_explainer=app.state.causal_explainer,
+    )
+    
+    # Initialize NLG components
+    text_builder = TextBuilder()
+    style_adapter = StyleAdapter()
+    app.state.nlg_engine = NLGEngine(text_builder, style_adapter)
+    app.state.evidence_narrator = EvidenceNarrator()
+    
+    # Initialize templates
+    template_loader = TemplateLoader()
+    app.state.template_manager = TemplateManager(template_loader)
+    
+    # Initialize visualization
+    graph_renderer = GraphRenderer()
+    app.state.visual_explainer = VisualExplainer(graph_renderer)
+    
+    startup_time_ms = (time.time() - start_time) * 1000
+    log_service_ready(settings.service_name, startup_time_ms)
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down Explanation-Engine")
+    await app.state.context_builder.close()
+
+
+# Create FastAPI app
+app = FastAPI(
+    title=settings.api_title,
+    version=settings.api_version,
+    description="Cognitive Introspection & Justification Service",
+    lifespan=lifespan,
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Middleware for request tracking
+@app.middleware("http")
+async def track_requests(request: Request, call_next):
+    """Track request metrics"""
+    start_time = time.time()
+    
+    response = await call_next(request)
+    
+    duration = time.time() - start_time
+    request_latency.labels(endpoint=request.url.path).observe(duration)
+    
+    return response
+
+
+# Exception handler
+@app.exception_handler(ExplanationEngineError)
+async def explanation_error_handler(request: Request, exc: ExplanationEngineError):
+    """Handle explanation engine errors"""
+    logger.error(
+        "Explanation error",
+        error=exc.message,
+        details=exc.details,
+    )
+    
+    request_counter.labels(
+        endpoint=request.url.path,
+        status="error"
+    ).inc()
+    
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=exc.to_dict(),
+    )
+
+
+# Health check endpoint
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Health check"
+)
+async def health_check():
+    """Health check endpoint"""
+    return HealthResponse(
+        status="healthy",
+        service=settings.service_name,
+        version=settings.api_version,
+        timestamp=time.time(),
+    )
+
+
+# Readiness check endpoint
+@app.get(
+    "/ready",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Readiness check"
+)
+async def readiness_check():
+    """Readiness check endpoint"""
+    # TODO: Check upstream service connectivity
+    return HealthResponse(
+        status="ready",
+        service=settings.service_name,
+        version=settings.api_version,
+        timestamp=time.time(),
+    )
+
+
+# Metrics endpoint
+@app.get(
+    "/metrics",
+    tags=["Monitoring"],
+    summary="Prometheus metrics"
+)
+async def metrics():
+    """Expose Prometheus metrics"""
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(generate_latest())
+
+
+# Main explanation endpoint
+@app.post(
+    f"{settings.api_prefix}/explain",
+    response_model=ExplainResponse,
+    tags=["Explanation"],
+    summary="Generate explanation",
+    description="Generate complete explanation for a decision"
+)
+async def explain_decision(
+    request_data: ExplainRequest,
+    request: Request,
+):
+    """
+    Generate explanation for a decision
+    
+    This endpoint:
+    1. Validates decision integrity
+    2. Retrieves reasoning traces, belief states, and context
+    3. Builds causal and reasoning chains
+    4. Assembles explanation structure
+    5. Generates natural language
+    6. Optionally produces visualization
+    
+    Returns complete Explanation object
+    """
+    start_time = time.time()
+    
+    logger.info(
+        "Explanation request received",
+        decision_id=request_data.decision_id,
+        style=request_data.style,
+    )
+    
+    try:
+        # Build context
+        context = await request.app.state.context_builder.build_context(
+            decision_id=request_data.decision_id,
+            require_all_traces=settings.require_all_traces,
+        )
+        
+        # Fetch trace data (placeholder - in production, fetch from Redis/DB)
+        trace_data = {
+            "trace_1": {
+                "reasoning_steps": [],
+                "rejected_alternatives": [],
+                "invalidation_conditions": [],
+            }
+        }
+        
+        # Fetch belief data (placeholder)
+        belief_data = {
+            "belief_1": {
+                "concept_id": context.semantic_context.concept_id,
+                "timestamp": context.timestamp.isoformat(),
+                "value": "bullish",
+                "confidence": context.confidence,
+                "evidence_count": len(context.evidence_sources),
+            }
+        }
+        
+        # Fetch causal graph (placeholder)
+        causal_graph = {
+            "nodes": [],
+            "edges": [],
+        }
+        
+        # Generate explanation
+        explanation = await request.app.state.explanation_generator.generate(
+            context=context,
+            trace_data=trace_data,
+            belief_data=belief_data,
+            causal_graph=causal_graph,
+            style=request_data.style,
+            include_visuals=request_data.include_visuals,
+        )
+        
+        # Generate refined natural language
+        natural_language = request.app.state.nlg_engine.generate_text(
+            explanation=explanation,
+            style=request_data.style,
+        )
+        
+        # Generate visual payload if requested
+        visual_payload = None
+        if request_data.include_visuals:
+            visual_payload = request.app.state.visual_explainer.generate_visual_payload(
+                explanation=explanation,
+            )
+        
+        generation_time_ms = (time.time() - start_time) * 1000
+        
+        logger.info(
+            "Explanation generated successfully",
+            decision_id=request_data.decision_id,
+            generation_time_ms=generation_time_ms,
+            confidence=explanation.confidence.overall,
+        )
+        
+        request_counter.labels(
+            endpoint=request.url.path,
+            status="success"
+        ).inc()
+        
+        return ExplainResponse(
+            explanation=explanation.to_dict(),
+            natural_language=natural_language,
+            visual_payload=visual_payload,
+            trace_ids=context.reasoning_trace_ids,
+            generation_time_ms=generation_time_ms,
+        )
+        
+    except Exception as e:
+        logger.error(
+            "Explanation generation failed",
+            decision_id=request_data.decision_id,
+            error=str(e),
+            exc_info=True,
+        )
+        
+        request_counter.labels(
+            endpoint=request.url.path,
+            status="error"
+        ).inc()
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Explanation generation failed: {str(e)}"
+        )
+
+
+# Belief evolution endpoint
+@app.get(
+    f"{settings.api_prefix}/explain/belief/{{concept_id}}",
+    tags=["Explanation"],
+    summary="Explain belief evolution"
+)
+async def explain_belief_evolution(
+    concept_id: str,
+    request: Request,
+):
+    """Explain how a belief evolved over time"""
+    try:
+        # TODO: Implement belief evolution explanation
+        return {
+            "concept_id": concept_id,
+            "message": "Belief evolution explanation not yet implemented"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+# Reasoning path endpoint
+@app.get(
+    f"{settings.api_prefix}/explain/path",
+    tags=["Explanation"],
+    summary="Get reasoning path"
+)
+async def get_reasoning_path(
+    from_concept: str,
+    to_concept: str,
+    request: Request,
+):
+    """Get reasoning path between two concepts"""
+    try:
+        # TODO: Implement reasoning path retrieval
+        return {
+            "from": from_concept,
+            "to": to_concept,
+            "message": "Reasoning path not yet implemented"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+# Root endpoint
+@app.get("/", tags=["Info"])
+async def root():
+    """Root endpoint with service information"""
+    return {
+        "service": settings.service_name,
+        "version": settings.api_version,
+        "status": "operational",
+        "endpoints": {
+            "health": "/health",
+            "ready": "/ready",
+            "metrics": "/metrics",
+            "explain": f"{settings.api_prefix}/explain",
+            "docs": "/docs",
+        }
+    }
+
+
+# Main entry point
+if __name__ == "__main__":
+    import uvicorn
+    
+    uvicorn.run(
+        "src.main:app",
+        host="0.0.0.0",
+        port=settings.service_port,
+        reload=settings.is_development(),
+        log_level=settings.log_level.lower(),
+    )

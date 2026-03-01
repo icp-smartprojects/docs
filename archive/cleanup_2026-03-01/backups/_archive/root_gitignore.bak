@@ -1,0 +1,75 @@
+# ============================================================
+# AUREXIS Root .gitignore
+# ============================================================
+
+# Individual service repos (each has own .git)
+Back_End_Auth_System/
+candle-constructor/
+core-brain/
+event-bus/
+explanation-engine/
+frontend/
+gateway/
+knowledge-graph/
+language-intelligence/
+learning-engine/
+lightweight-charts/
+market-ingestion/
+meaning-engine/
+memory/
+ontology/
+perception/
+policy-engine/
+price-observer/
+reasoning-engine/
+schema-registry/
+security/
+shape-engine/
+simulation/
+topology-hub/
+topology-hub-express/
+Landing_Page/
+
+# Future services (reserved)
+dream-engine/
+market-replay/
+monitoring-dashboard/
+
+# Root-owned dirs (created by Docker — cannot remove without sudo)
+config/
+scripts_root_tmp/
+
+# Build artifacts
+node_modules/
+__pycache__/
+*.pyc
+venv/
+env/
+ENV/
+.venv/
+dist/
+build/
+target/
+
+# Compiled Go binaries
+event-bus/event-bus
+gateway/main
+schema-registry/schema-registry
+topology-hub/hub
+topology-hub/topology-hub
+
+# Backup/temp files
+*.backup
+*.bak
+*.old
+
+# Runtime
+logs/
+pids/
+.pids/
+*.log
+.env
+*.pid
+
+# Office lock files
+.~lock.*

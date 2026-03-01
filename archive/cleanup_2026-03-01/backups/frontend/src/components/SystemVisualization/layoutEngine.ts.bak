@@ -1,0 +1,210 @@
+/**
+ * Layout Engine
+ * Computes exact positions of services on the system map using concentric rings
+ */
+
+export interface ServicePosition {
+  serviceId: string;
+  x: number;
+  y: number;
+  ring: 'center' | 'inner' | 'middle' | 'outer';
+  angle: number;
+}
+
+export interface LayoutConfig {
+  centerX: number;
+  centerY: number;
+  innerRingRadius: number;
+  middleRingRadius: number;
+  outerRingRadius: number;
+}
+
+/**
+ * Service rings (from your canonical spec)
+ */
+const SERVICE_RINGS = {
+  center: ['core-brain'],
+  inner: ['perception', 'meaning-engine', 'reasoning-engine', 'simulation-engine'],
+  middle: ['learning-engine', 'memory-engine', 'knowledge-graph', 'ontology'],
+  outer: ['market-ingestion', 'price-observer', 'event-bus', 'schema-registry', 'gateway', 'observability', 'explanation-engine'],
+};
+
+/**
+ * Compute layout configuration based on viewport
+ */
+export function getLayoutConfig(width: number, height: number): LayoutConfig {
+  return {
+    centerX: width / 2,
+    centerY: height / 2,
+    innerRingRadius: Math.min(width, height) * 0.22,
+    middleRingRadius: Math.min(width, height) * 0.38,
+    outerRingRadius: Math.min(width, height) * 0.52,
+  };
+}
+
+/**
+ * Compute exact position of a service in the system map
+ * Uses polar coordinates transformed to Cartesian
+ */
+export function computeServicePosition(
+  serviceId: string,
+  config: LayoutConfig
+): ServicePosition | null {
+  let ring: keyof typeof SERVICE_RINGS | null = null;
+  let ringServices: string[] = [];
+  let radius: number = 0;
+
+  // Find which ring this service belongs to
+  for (const [ringName, services] of Object.entries(SERVICE_RINGS)) {
+    if (services.includes(serviceId)) {
+      ring = ringName as keyof typeof SERVICE_RINGS;
+      ringServices = services;
+      break;
+    }
+  }
+
+  if (!ring) return null;
+
+  // Assign radius based on ring
+  if (ring === 'center') {
+    return {
+      serviceId,
+      x: config.centerX,
+      y: config.centerY,
+      ring: 'center',
+      angle: 0,
+    };
+  }
+
+  const radiusMap: Record<string, number> = {
+    inner: config.innerRingRadius,
+    middle: config.middleRingRadius,
+    outer: config.outerRingRadius,
+  };
+
+  radius = radiusMap[ring];
+
+  // Compute angle: equal distribution around circle
+  const serviceIndex = ringServices.indexOf(serviceId);
+  const totalServices = ringServices.length;
+  const angleStep = (2 * Math.PI) / totalServices;
+  const angle = angleStep * serviceIndex - Math.PI / 2; // Start at top
+
+  // Convert polar to Cartesian
+  const x = config.centerX + radius * Math.cos(angle);
+  const y = config.centerY + radius * Math.sin(angle);
+
+  return {
+    serviceId,
+    x,
+    y,
+    ring: ring as 'center' | 'inner' | 'middle' | 'outer',
+    angle,
+  };
+}
+
+/**
+ * Compute positions for all services
+ */
+export function computeAllPositions(width: number, height: number): Record<string, ServicePosition> {
+  const config = getLayoutConfig(width, height);
+  const positions: Record<string, ServicePosition> = {};
+
+  const allServices = Object.values(SERVICE_RINGS).flat();
+
+  for (const serviceId of allServices) {
+    const pos = computeServicePosition(serviceId, config);
+    if (pos) {
+      positions[serviceId] = pos;
+    }
+  }
+
+  return positions;
+}
+
+/**
+ * Get shape type for each service (canonical spec)
+ */
+export function getServiceShape(
+  serviceId: string
+): string {
+  const shapeMap: Record<string, string> = {
+    // Core
+    'core-brain': 'circle',
+    
+    // Cognitive Pipeline (Inner ring)
+    'perception': 'eye',
+    'meaning-engine': 'square',
+    'reasoning-engine': 'diamond',
+    'simulation-engine': 'octagon',
+    
+    // Intelligence & Memory (Middle ring)
+    'learning-engine': 'oval',
+    'memory-engine': 'hexagon',
+    'knowledge-graph': 'node-mesh',
+    'ontology': 'triangle',
+    
+    // Data & Infrastructure (Outer ring)
+    'market-ingestion': 'funnel',
+    'price-observer': 'candlestick',
+    'event-bus': 'double-arrow',
+    'schema-registry': 'shield',
+    'gateway': 'portal',
+    'observability': 'radar',
+    'explanation-engine': 'rectangle',
+  };
+
+  return shapeMap[serviceId] || 'circle';
+}
+
+/**
+ * Get display name for service
+ */
+export function getServiceName(serviceId: string): string {
+  const nameMap: Record<string, string> = {
+    'core-brain': 'Core Brain',
+    'perception': 'Perception',
+    'meaning-engine': 'Meaning Engine',
+    'reasoning-engine': 'Reasoning Engine',
+    'simulation-engine': 'Simulation Engine',
+    'learning-engine': 'Learning Engine',
+    'memory-engine': 'Memory Engine',
+    'knowledge-graph': 'Knowledge Graph',
+    'ontology': 'Ontology',
+    'market-ingestion': 'Market Ingestion',
+    'price-observer': 'Price Observer',
+    'event-bus': 'Event Bus',
+    'schema-registry': 'Schema Registry',
+    'gateway': 'Gateway',
+    'observability': 'Observability',
+    'explanation-engine': 'Explanation Engine',
+  };
+
+  return nameMap[serviceId] || serviceId;
+}
+
+/**
+ * Get description for service
+ */
+export function getServiceDescription(serviceId: string): string {
+  const descMap: Record<string, string> = {
+    'core-brain': 'Central decision authority and cognitive hub',
+    'perception': 'Market signal detection and analysis',
+    'meaning-engine': 'Context and semantic interpretation',
+    'reasoning-engine': 'Logic and inference processing',
+    'simulation-engine': 'Monte Carlo scenarios and predictions',
+    'learning-engine': 'Pattern recognition and model training',
+    'memory-engine': 'Long-term episodic and semantic recall',
+    'knowledge-graph': 'Entity relationships and connections',
+    'ontology': 'Hierarchical domain knowledge',
+    'market-ingestion': 'Raw tick data ingestion and detection',
+    'price-observer': 'OHLC candle aggregation and analysis',
+    'event-bus': 'Distributed event routing and propagation',
+    'schema-registry': 'Data contract validation and enforcement',
+    'gateway': 'API entry point and request routing',
+    'observability': 'System monitoring and health tracking',
+    'explanation-engine': 'Decision reasoning and trace generation',
+  };
+
+  return descMap[serviceId] || 'System service';
+}

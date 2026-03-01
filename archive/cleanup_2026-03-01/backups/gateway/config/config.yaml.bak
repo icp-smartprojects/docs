@@ -1,0 +1,263 @@
+environment: development
+service_name: api-gateway
+port: "52031"
+
+auth:
+  enabled: true
+  jwt_secret: "dev-secret-change-in-production"
+  jwt_expiration: 15m
+  refresh_enabled: true
+  refresh_ttl: 168h
+  access_control_url: http://access-control:52008
+
+services:
+  ingestion_engine:
+    url: http://market-ingestion:52010
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+    load_balancing: round-robin
+
+  auth_service:
+    url: http://auth-service:5500
+    health_endpoint: /health
+    timeout: 15s
+    retry_count: 3
+    retry_delay: 1s
+    load_balancing: none
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5
+      reset_timeout: 30s
+  
+  perception_engine:
+    url: http://perception:52012
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  meaning_engine:
+    url: http://meaning-engine:52003
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  learning_engine:
+    url: http://learning-engine:52004
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  explanation_engine:
+    url: http://explanation-engine:52005
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  language_engine:
+    url: http://language-intelligence:52006
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  cyber_guard:
+    url: http://cyber-guard:52007
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  access_control:
+    url: http://access-control:52008
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  file_scanner:
+    url: http://file-scanner:52009
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  shape_recognition:
+    url: http://shape-engine:52010
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  pattern_genome:
+    url: http://pattern-genome:52011
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  signal_engine:
+    url: http://signal-engine:52012
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  multi_tf_consensus:
+    url: http://multi-tf-consensus:52013
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  execution_engine:
+    url: http://execution-engine:52014
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  semantic_memory:
+    url: http://knowledge-graph:52015
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  book_reader:
+    url: http://memory:52018
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  conversation_engine:
+    url: http://conversation-engine:52017
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  dream_engine:
+    url: http://simulation:52043
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  kpi_tracker:
+    url: http://kpi-tracker:52019
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  api_marketplace:
+    url: http://event-bus:52020
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  logging_engine:
+    url: http://logging-engine:52021
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+  
+  demo_system:
+    url: http://demo-system:52022
+    health_endpoint: /health
+    timeout: 30s
+    retry_count: 3
+    retry_delay: 1s
+
+rate_limit:
+  enabled: true
+  requests_per: 100
+  window_size: 1m
+  burst_size: 20
+  role_limits:
+    admin: 1000
+    trader: 500
+    viewer: 100
+
+cors:
+  enabled: true
+  allowed_origins:
+    - "http://localhost:52000"
+    - "http://localhost:3000"
+    - "http://localhost"
+    - "http://127.0.0.1"
+    - "http://0.0.0.0"
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - PATCH
+    - OPTIONS
+  allowed_headers:
+    - Origin
+    - Content-Type
+    - Accept
+    - Authorization
+    - X-Request-ID
+    - X-Correlation-ID
+  exposed_headers:
+    - X-Request-ID
+    - X-Correlation-ID
+  allow_credentials: true
+  max_age: 3600
+
+circuit_breaker:
+  enabled: true
+  threshold: 5
+  timeout: 60s
+  max_concurrent: 100
+  volume_threshold: 20
+  error_percentage: 50
+
+tracing:
+  enabled: true
+  service_name: api-gateway
+  jaeger_url: http://jaeger:14268/api/traces
+  sampling_rate: 0.1
+
+metrics:
+  enabled: true
+  port: "9090"
+  path: /metrics
+
+websocket:
+  enabled: true
+  path: /ws/semantic-stream
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+  ping_interval: 30s
+  pong_wait: 60s
+  write_wait: 10s
+  max_message_size: 512000
+  enable_compression: true
+
+timeouts:
+  read: 30s
+  write: 30s
+  idle: 120s
+  shutdown: 15s
+  service_call: 30s
+
+logging:
+  level: info
+  format: json
+  output: stdout
+  max_size: 100
+  max_backups: 3
+  max_age: 7
+  compress: true

@@ -1,0 +1,331 @@
+/**
+ * DREAM ENGINE VIEWER
+ * Real-time visualization of system dreaming activity
+ * Shows consolidation, rehearsal, pattern discovery
+ */
+import { useState, useEffect, useRef } from 'react';
+import {
+  Moon,
+  Brain,
+  Sparkles,
+  Zap,
+  Clock,
+  Activity,
+  Eye,
+  Lightbulb,
+  Network,
+  Play,
+  Pause,
+  RotateCcw,
+  MessageSquare,
+  ChevronRight,
+} from 'lucide-react';
+import CommandLayout from '@/layouts/CommandLayout';
+import BackButton from '@/components/BackButton';
+
+interface Dream {
+  id: number;
+  type: 'consolidation' | 'rehearsal' | 'exploration' | 'pattern-discovery' | 'memory-replay';
+  title: string;
+  description: string;
+  intensity: number; // 0-100
+  timestamp: string;
+  phase: 'REM' | 'DEEP' | 'LIGHT' | 'ACTIVE';
+  connections: number;
+}
+
+const DREAM_TYPES = {
+  consolidation: { color: 'var(--mil-purple)', icon: Brain, label: 'Consolidation' },
+  rehearsal: { color: 'var(--mil-cyan)', icon: RotateCcw, label: 'Rehearsal' },
+  exploration: { color: 'var(--mil-green)', icon: Sparkles, label: 'Exploration' },
+  'pattern-discovery': { color: 'var(--mil-amber)', icon: Lightbulb, label: 'Pattern Discovery' },
+  'memory-replay': { color: 'var(--mil-orange)', icon: Eye, label: 'Memory Replay' },
+};
+
+export default function DreamEngineViewer() {
+  const [dreams, setDreams] = useState<Dream[]>([]);
+  const [isDreaming, setIsDreaming] = useState(false);
+  const [selectedDream, setSelectedDream] = useState<Dream | null>(null);
+  const [dreamPhase, setDreamPhase] = useState<'REM' | 'DEEP' | 'LIGHT' | 'ACTIVE'>('LIGHT');
+  const [totalDreams, setTotalDreams] = useState(0);
+  const [aiExplaining, setAiExplaining] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const typingRef = useRef<NodeJS.Timeout | null>(null);
+  const dreamCounter = useRef(0);
+
+  // Dream generation loop
+  useEffect(() => {
+    if (!isDreaming) return;
+
+    const titles = {
+      consolidation: [
+        'Consolidating candlestick pattern library',
+        'Merging orderflow knowledge with price structure',
+        'Strengthening profitable shape recognition pathways',
+      ],
+      rehearsal: [
+        'Rehearsing breakout entry strategy',
+        'Replaying mean-reversion trade sequence',
+        'Practicing risk management on volatile moves',
+      ],
+      exploration: [
+        'Exploring novel support/resistance detection',
+        'Testing hypothetical correlation patterns',
+        'Dreaming of unseen market microstructures',
+      ],
+      'pattern-discovery': [
+        'Discovered recurring fractal at H4-D1 junction',
+        'New pattern: engulfing + volume spike combo',
+        'Found hidden harmonic relationship in VWAP',
+      ],
+      'memory-replay': [
+        'Replaying trade #2847 — profitable scalp',
+        'Re-experiencing drawdown event #12',
+        'Reviewing historical shape transition sequence',
+      ],
+    };
+
+    const phases: Dream['phase'][] = ['REM', 'DEEP', 'LIGHT', 'ACTIVE'];
+    const types: Dream['type'][] = Object.keys(DREAM_TYPES) as Dream['type'][];
+
+    const interval = setInterval(() => {
+      const type = types[Math.floor(Math.random() * types.length)];
+      const titleList = titles[type];
+      const title = titleList[Math.floor(Math.random() * titleList.length)];
+      const phase = phases[Math.floor(Math.random() * phases.length)];
+      setDreamPhase(phase);
+
+      const newDream: Dream = {
+        id: ++dreamCounter.current,
+        type,
+        title,
+        description: `The system is ${type === 'consolidation' ? 'strengthening neural pathways' : type === 'rehearsal' ? 'practicing learned strategies' : type === 'exploration' ? 'exploring uncharted pattern space' : type === 'pattern-discovery' ? 'synthesizing new pattern knowledge' : 'replaying recorded experiences'} during ${phase} phase. Intensity varies with market complexity.`,
+        intensity: Math.random() * 100,
+        timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
+        phase,
+        connections: Math.floor(Math.random() * 50) + 5,
+      };
+
+      setDreams((prev) => [newDream, ...prev].slice(0, 100));
+      setTotalDreams((t) => t + 1);
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [isDreaming]);
+
+  const explainDream = (dream: Dream) => {
+    setAiExplaining(true);
+    const text = `Dream Analysis: "${dream.title}"\n\nPhase: ${dream.phase}\nType: ${DREAM_TYPES[dream.type].label}\nIntensity: ${dream.intensity.toFixed(1)}%\nNeural Connections Activated: ${dream.connections}\n\nDuring this ${dream.phase} phase, the system ${dream.type === 'consolidation' ? 'is strengthening learned trading patterns by replaying successful decision sequences and reinforcing neural pathway weights' : dream.type === 'rehearsal' ? 'is actively practicing trade execution scenarios to improve reaction time and decision quality under simulated stress' : dream.type === 'exploration' ? 'is venturing into unexplored pattern space, testing hypothetical market structures that may emerge in future conditions' : dream.type === 'pattern-discovery' ? 'has identified a novel pattern relationship that doesn\'t exist in the current knowledge base — this will be integrated upon awakening' : 'is replaying historical market events to strengthen episodic memory and refine emotional regulation during drawdowns'}. This dream connects to ${dream.connections} existing knowledge nodes in the graph.`;
+
+    setAiText('');
+    let i = 0;
+    if (typingRef.current) clearInterval(typingRef.current);
+    typingRef.current = setInterval(() => {
+      if (i < text.length) {
+        setAiText(text.slice(0, i + 1));
+        i++;
+      } else {
+        if (typingRef.current) clearInterval(typingRef.current);
+      }
+    }, 15);
+  };
+
+  const closeExplanation = () => {
+    setAiExplaining(false);
+    setAiText('');
+    if (typingRef.current) clearInterval(typingRef.current);
+  };
+
+  const getPhaseColor = (phase: Dream['phase']) => {
+    switch (phase) {
+      case 'REM': return 'var(--mil-purple)';
+      case 'DEEP': return 'var(--mil-cyan)';
+      case 'LIGHT': return 'var(--mil-amber)';
+      case 'ACTIVE': return 'var(--mil-green)';
+    }
+  };
+
+  const dreamsByType = Object.keys(DREAM_TYPES).reduce((acc, type) => {
+    acc[type] = dreams.filter((d) => d.type === type).length;
+    return acc;
+  }, {} as Record<string, number>);
+
+  return (
+    <CommandLayout>
+      <BackButton label="Dashboard" to="/" />
+      <div style={{ marginBottom: '1.25rem' }}>
+        <h1 className="text-tactical" style={{ fontSize: '1.125rem', color: 'var(--mil-text-primary)', marginBottom: '0.25rem' }}>
+          Dream Engine
+        </h1>
+        <p style={{ fontSize: '0.75rem', color: 'var(--mil-text-tertiary)' }}>
+          Real-time dreaming activity · Consolidation · Pattern discovery · Memory replay
+        </p>
+      </div>
+
+      {/* Controls + Phase */}
+      <div className="mil-card" style={{ marginBottom: '1.25rem' }}>
+        <div className="mil-card-body" style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <button
+            className={`mil-btn ${isDreaming ? 'mil-btn-danger' : 'mil-btn-primary'} mil-btn-lg`}
+            onClick={() => setIsDreaming(!isDreaming)}
+          >
+            {isDreaming ? <><Pause size={16} /> Stop Dreaming</> : <><Play size={16} /> Start Dreaming</>}
+          </button>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.375rem 0.875rem',
+            background: isDreaming ? `${getPhaseColor(dreamPhase)}20` : 'var(--mil-bg-tertiary)',
+            border: `1px solid ${isDreaming ? getPhaseColor(dreamPhase) : 'var(--mil-border)'}`,
+            borderRadius: 'var(--mil-radius-md)',
+          }}>
+            <Moon size={14} style={{ color: isDreaming ? getPhaseColor(dreamPhase) : 'var(--mil-text-muted)' }} />
+            <span style={{
+              fontFamily: 'var(--font-din-1451)',
+              fontSize: '0.6875rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              fontWeight: 600,
+              color: isDreaming ? getPhaseColor(dreamPhase) : 'var(--mil-text-muted)',
+            }}>
+              Phase: {isDreaming ? dreamPhase : 'AWAKE'}
+            </span>
+          </div>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '1.5rem' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div className="text-label-mil">Total Dreams</div>
+              <div className="text-value-mil" style={{ fontSize: '1rem', fontWeight: 700 }}>{totalDreams}</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div className="text-label-mil">Active Phase</div>
+              <div className="text-value-mil" style={{ fontSize: '1rem', fontWeight: 700, color: isDreaming ? getPhaseColor(dreamPhase) : 'var(--mil-text-muted)' }}>
+                {isDreaming ? dreamPhase : '--'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats by Type */}
+      <div className="mil-grid mil-grid-5" style={{ marginBottom: '1.25rem' }}>
+        {Object.entries(DREAM_TYPES).map(([type, config]) => {
+          const Icon = config.icon;
+          return (
+            <div key={type} className="mil-stat-card">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                <Icon size={14} style={{ color: config.color }} />
+                <span className="mil-stat-label">{config.label}</span>
+              </div>
+              <span className="mil-stat-value" style={{ color: config.color }}>
+                {dreamsByType[type] || 0}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Dream Stream */}
+      <div className="mil-card">
+        <div className="mil-card-header">
+          <span className="mil-card-title">Dream Stream</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: isDreaming ? 'var(--mil-purple)' : 'var(--mil-text-muted)', animation: isDreaming ? 'pulse-dot 2s infinite' : 'none' }} />
+            <span style={{ fontSize: '0.5625rem', color: 'var(--mil-text-muted)', textTransform: 'uppercase' }}>
+              {isDreaming ? 'Dreaming' : 'Awake'}
+            </span>
+          </div>
+        </div>
+        <div className="mil-scroll" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+          {dreams.length === 0 ? (
+            <div style={{ padding: '3rem 1rem', textAlign: 'center', color: 'var(--mil-text-muted)' }}>
+              <Moon size={32} style={{ margin: '0 auto 0.75rem', opacity: 0.3 }} />
+              <div style={{ fontSize: '0.75rem' }}>Start dreaming to see activity</div>
+            </div>
+          ) : (
+            dreams.map((dream) => {
+              const config = DREAM_TYPES[dream.type];
+              const Icon = config.icon;
+              return (
+                <div
+                  key={dream.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    padding: '0.75rem 1rem',
+                    borderBottom: '1px solid var(--mil-border)',
+                    cursor: 'pointer',
+                    transition: 'background 200ms',
+                  }}
+                  onClick={() => explainDream(dream)}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--mil-bg-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 'var(--mil-radius-md)',
+                    background: `${config.color}20`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>
+                    <Icon size={16} style={{ color: config.color }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--mil-text-primary)', marginBottom: '0.125rem' }}>
+                      {dream.title}
+                    </div>
+                    <div style={{ fontSize: '0.625rem', color: 'var(--mil-text-muted)', display: 'flex', gap: '0.75rem' }}>
+                      <span>{dream.timestamp}</span>
+                      <span style={{ color: getPhaseColor(dream.phase) }}>{dream.phase}</span>
+                      <span>{dream.connections} connections</span>
+                    </div>
+                  </div>
+                  {/* Intensity bar */}
+                  <div style={{ width: '60px', flexShrink: 0 }}>
+                    <div className="mil-signal-bar">
+                      <div
+                        className={`mil-signal-bar-fill ${dream.intensity > 70 ? 'cyan' : dream.intensity > 40 ? 'amber' : 'green'}`}
+                        style={{ width: `${dream.intensity}%` }}
+                      />
+                    </div>
+                  </div>
+                  <ChevronRight size={14} style={{ color: 'var(--mil-text-muted)', flexShrink: 0 }} />
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* AI Explanation Modal */}
+      {aiExplaining && (
+        <div className="mil-modal-overlay" onClick={closeExplanation}>
+          <div className="mil-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mil-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Moon size={16} style={{ color: 'var(--mil-purple)' }} />
+                <span className="mil-card-title">Dream Analysis</span>
+              </div>
+              <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={closeExplanation}>✕</button>
+            </div>
+            <div className="mil-modal-body">
+              <pre className="mil-ai-message" style={{ whiteSpace: 'pre-wrap', fontFamily: 'var(--font-din-1451)' }}>
+                {aiText}
+                <span className="mil-ai-cursor" />
+              </pre>
+            </div>
+            <div className="mil-modal-footer">
+              <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={closeExplanation}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </CommandLayout>
+  );
+}

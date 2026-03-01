@@ -1,0 +1,405 @@
+/**
+ * TRAINING CENTER
+ * Real-time training mode with reward/punishment controls
+ * Shows how the system sees, learns, and adapts
+ */
+import { useState, useEffect, useRef } from 'react';
+import {
+  Target,
+  Play,
+  Pause,
+  Square,
+  ThumbsUp,
+  ThumbsDown,
+  AlertTriangle,
+  Brain,
+  Eye,
+  TrendingUp,
+  TrendingDown,
+  BarChart3,
+  MessageSquare,
+  Zap,
+  Clock,
+  ArrowUp,
+  ArrowDown,
+  Minus,
+  Award,
+  Skull,
+  RefreshCw,
+  Activity,
+} from 'lucide-react';
+import CommandLayout from '@/layouts/CommandLayout';
+import BackButton from '@/components/BackButton';
+
+interface TrainingEvent {
+  id: number;
+  time: string;
+  type: 'observation' | 'decision' | 'reward' | 'punishment' | 'insight';
+  message: string;
+  confidence?: number;
+}
+
+interface RewardHistory {
+  total: number;
+  rewards: number;
+  punishments: number;
+  neutrals: number;
+}
+
+export default function TrainingCenter() {
+  const [isTraining, setIsTraining] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [epoch, setEpoch] = useState(0);
+  const [events, setEvents] = useState<TrainingEvent[]>([]);
+  const [rewardHistory, setRewardHistory] = useState<RewardHistory>({ total: 0, rewards: 0, punishments: 0, neutrals: 0 });
+  const [currentDecision, setCurrentDecision] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState(0);
+  const [perceptionState, setPerceptionState] = useState('Scanning market structure...');
+  const [aiExplaining, setAiExplaining] = useState(false);
+  const [aiExplanation, setAiExplanation] = useState('');
+  const [aiExplanationText, setAiExplanationText] = useState('');
+  const eventCounter = useRef(0);
+  const typingInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // Training simulation loop
+  useEffect(() => {
+    if (!isTraining || isPaused) return;
+
+    const decisions = ['BUY', 'SELL', 'HOLD', 'WAIT', 'SCALE IN', 'SCALE OUT'];
+    const observations = [
+      'Detected bullish divergence on M5',
+      'Price approaching key resistance at 1.2340',
+      'Volume spike detected — institutional activity',
+      'Mean-reversion signal triggered',
+      'Pattern: Head & Shoulders forming on H1',
+      'Orderflow analysis: buyers absorbing supply',
+      'Shape engine detected fractal repetition',
+      'Topology shift: trend transitioning to range',
+    ];
+
+    const perceptionMsgs = [
+      'Analyzing candlestick patterns...',
+      'Processing multi-timeframe signals...',
+      'Evaluating market microstructure...',
+      'Scanning for shape anomalies...',
+      'Computing reward expectation...',
+      'Consulting meaning engine...',
+      'Integrating knowledge graph relationships...',
+    ];
+
+    const interval = setInterval(() => {
+      setEpoch((e) => e + 1);
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+      const newConfidence = Math.random() * 100;
+      setConfidence(newConfidence);
+
+      // Generate observation event
+      const obs = observations[Math.floor(Math.random() * observations.length)];
+      const obsEvent: TrainingEvent = {
+        id: ++eventCounter.current,
+        time,
+        type: 'observation',
+        message: obs,
+        confidence: newConfidence,
+      };
+
+      // Generate decision event
+      const dec = decisions[Math.floor(Math.random() * decisions.length)];
+      setCurrentDecision(dec);
+      const decEvent: TrainingEvent = {
+        id: ++eventCounter.current,
+        time,
+        type: 'decision',
+        message: `System decided: ${dec} (confidence: ${newConfidence.toFixed(1)}%)`,
+        confidence: newConfidence,
+      };
+
+      setPerceptionState(perceptionMsgs[Math.floor(Math.random() * perceptionMsgs.length)]);
+      setEvents((prev) => [decEvent, obsEvent, ...prev].slice(0, 200));
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [isTraining, isPaused]);
+
+  const applyReward = () => {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const evt: TrainingEvent = {
+      id: ++eventCounter.current,
+      time,
+      type: 'reward',
+      message: `REWARD applied to decision: ${currentDecision || 'N/A'}`,
+    };
+    setEvents((prev) => [evt, ...prev].slice(0, 200));
+    setRewardHistory((prev) => ({ ...prev, total: prev.total + 1, rewards: prev.rewards + 1 }));
+  };
+
+  const applyPunishment = () => {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const evt: TrainingEvent = {
+      id: ++eventCounter.current,
+      time,
+      type: 'punishment',
+      message: `PUNISHMENT applied to decision: ${currentDecision || 'N/A'}`,
+    };
+    setEvents((prev) => [evt, ...prev].slice(0, 200));
+    setRewardHistory((prev) => ({ ...prev, total: prev.total + 1, punishments: prev.punishments + 1 }));
+  };
+
+  const requestExplanation = () => {
+    setAiExplaining(true);
+    const fullText = `The system observed a ${currentDecision || 'HOLD'} signal based on multi-timeframe analysis. The perception engine detected a potential pattern shift at the current price level. Mean reversion indicators are showing ${confidence > 50 ? 'bullish' : 'bearish'} divergence. The reasoning engine weighted 7 factors: candlestick structure (0.23), volume profile (0.18), shape coherence (0.15), topological state (0.14), historical meaning (0.12), knowledge graph context (0.10), and learning reward balance (0.08). Confidence level: ${confidence.toFixed(1)}%.`;
+    
+    setAiExplanationText('');
+    let i = 0;
+    
+    if (typingInterval.current) clearInterval(typingInterval.current);
+    typingInterval.current = setInterval(() => {
+      if (i < fullText.length) {
+        setAiExplanationText(fullText.slice(0, i + 1));
+        i++;
+      } else {
+        if (typingInterval.current) clearInterval(typingInterval.current);
+      }
+    }, 20);
+  };
+
+  const closeExplanation = () => {
+    setAiExplaining(false);
+    setAiExplanationText('');
+    if (typingInterval.current) clearInterval(typingInterval.current);
+  };
+
+  const getEventIcon = (type: TrainingEvent['type']) => {
+    switch (type) {
+      case 'observation': return <Eye size={12} style={{ color: 'var(--mil-cyan)' }} />;
+      case 'decision': return <Brain size={12} style={{ color: 'var(--mil-amber)' }} />;
+      case 'reward': return <ThumbsUp size={12} style={{ color: 'var(--mil-green)' }} />;
+      case 'punishment': return <ThumbsDown size={12} style={{ color: 'var(--mil-red)' }} />;
+      case 'insight': return <Zap size={12} style={{ color: 'var(--mil-purple)' }} />;
+    }
+  };
+
+  const getEventColor = (type: TrainingEvent['type']) => {
+    switch (type) {
+      case 'observation': return 'var(--mil-cyan)';
+      case 'decision': return 'var(--mil-amber)';
+      case 'reward': return 'var(--mil-green)';
+      case 'punishment': return 'var(--mil-red)';
+      case 'insight': return 'var(--mil-purple)';
+    }
+  };
+
+  return (
+    <CommandLayout systemMode={isTraining ? 'training' : 'idle'}>
+      <BackButton label="Dashboard" to="/" />
+      <div style={{ marginBottom: '1.25rem' }}>
+        <h1 className="text-tactical" style={{ fontSize: '1.125rem', color: 'var(--mil-text-primary)', marginBottom: '0.25rem' }}>
+          Training Center
+        </h1>
+        <p style={{ fontSize: '0.75rem', color: 'var(--mil-text-tertiary)' }}>
+          Supervised training · Reward/Punishment · Real-time system perception
+        </p>
+      </div>
+
+      {/* Training Controls */}
+      <div className="mil-card" style={{ marginBottom: '1.25rem' }}>
+        <div className="mil-card-body" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {!isTraining ? (
+            <button className="mil-btn mil-btn-primary mil-btn-lg" onClick={() => setIsTraining(true)}>
+              <Play size={16} /> Start Training
+            </button>
+          ) : (
+            <>
+              <button
+                className="mil-btn mil-btn-secondary"
+                onClick={() => setIsPaused(!isPaused)}
+              >
+                {isPaused ? <Play size={14} /> : <Pause size={14} />}
+                {isPaused ? 'Resume' : 'Pause'}
+              </button>
+              <button
+                className="mil-btn mil-btn-danger"
+                onClick={() => { setIsTraining(false); setIsPaused(false); }}
+              >
+                <Square size={14} /> Stop
+              </button>
+            </>
+          )}
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div className="text-label-mil">Epoch</div>
+              <div className="text-value-mil" style={{ fontSize: '1rem', fontWeight: 700 }}>{epoch}</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div className="text-label-mil">Confidence</div>
+              <div className="text-value-mil" style={{ fontSize: '1rem', fontWeight: 700, color: confidence > 70 ? 'var(--mil-green)' : confidence > 40 ? 'var(--mil-amber)' : 'var(--mil-red)' }}>
+                {confidence.toFixed(1)}%
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '1.25rem' }}>
+        {/* Left Column – Training View */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* System Perception */}
+          <div className="mil-card">
+            <div className="mil-card-header">
+              <span className="mil-card-title">System Perception</span>
+              <span className="mil-badge mil-badge-info">{isTraining ? (isPaused ? 'PAUSED' : 'ACTIVE') : 'IDLE'}</span>
+            </div>
+            <div className="mil-card-body">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+                <Eye size={20} style={{ color: 'var(--mil-cyan)' }} />
+                <span style={{ fontSize: '0.8125rem', color: 'var(--mil-text-secondary)' }}>{perceptionState}</span>
+              </div>
+
+              {/* Current Decision */}
+              {currentDecision && isTraining && (
+                <div style={{
+                  padding: '1rem',
+                  background: 'var(--mil-bg-primary)',
+                  border: '1px solid var(--mil-amber-glow)',
+                  borderRadius: 'var(--mil-radius-md)',
+                  marginBottom: '1rem',
+                }}>
+                  <div className="text-label-mil" style={{ marginBottom: '0.5rem' }}>Current Decision</div>
+                  <div style={{
+                    fontSize: '1.5rem',
+                    fontWeight: 700,
+                    fontFamily: 'var(--font-din-1451)',
+                    color: currentDecision === 'BUY' || currentDecision === 'SCALE IN' ? 'var(--mil-green)' : currentDecision === 'SELL' || currentDecision === 'SCALE OUT' ? 'var(--mil-red)' : 'var(--mil-amber)',
+                    letterSpacing: '0.1em',
+                  }}>
+                    {currentDecision}
+                  </div>
+                  
+                  {/* Confidence Bar */}
+                  <div className="mil-signal-bar" style={{ marginTop: '0.75rem' }}>
+                    <div className={`mil-signal-bar-fill ${confidence > 70 ? 'green' : confidence > 40 ? 'amber' : 'red'}`} style={{ width: `${confidence}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Reward/Punishment Controls */}
+              {isTraining && (
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button
+                    className="mil-btn mil-btn-lg"
+                    onClick={applyReward}
+                    style={{ flex: 1, background: 'var(--mil-green-glow)', color: 'var(--mil-green)', border: '1px solid var(--mil-green)' }}
+                  >
+                    <ThumbsUp size={16} /> Reward
+                  </button>
+                  <button
+                    className="mil-btn mil-btn-lg"
+                    onClick={applyPunishment}
+                    style={{ flex: 1, background: 'var(--mil-red-glow)', color: 'var(--mil-red)', border: '1px solid var(--mil-red)' }}
+                  >
+                    <ThumbsDown size={16} /> Punish
+                  </button>
+                  <button
+                    className="mil-btn mil-btn-lg mil-btn-secondary"
+                    onClick={requestExplanation}
+                    style={{ flex: 1 }}
+                  >
+                    <MessageSquare size={16} /> Explain
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Reward Balance */}
+          <div className="mil-grid mil-grid-4">
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Total Actions</span>
+              <span className="mil-stat-value">{rewardHistory.total}</span>
+            </div>
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Rewards</span>
+              <span className="mil-stat-value" style={{ color: 'var(--mil-green)' }}>{rewardHistory.rewards}</span>
+            </div>
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Punishments</span>
+              <span className="mil-stat-value" style={{ color: 'var(--mil-red)' }}>{rewardHistory.punishments}</span>
+            </div>
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Reward Ratio</span>
+              <span className="mil-stat-value" style={{
+                color: rewardHistory.total > 0
+                  ? (rewardHistory.rewards / rewardHistory.total) > 0.6 ? 'var(--mil-green)' : 'var(--mil-amber)'
+                  : 'var(--mil-text-tertiary)',
+              }}>
+                {rewardHistory.total > 0 ? `${((rewardHistory.rewards / rewardHistory.total) * 100).toFixed(0)}%` : '--'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column – Event Stream */}
+        <div className="mil-card" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="mil-card-header">
+            <span className="mil-card-title">Training Events</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTraining ? 'var(--mil-green)' : 'var(--mil-text-muted)', animation: isTraining ? 'pulse-dot 2s infinite' : 'none' }} />
+              <span style={{ fontSize: '0.5625rem', color: 'var(--mil-text-muted)', textTransform: 'uppercase' }}>
+                {isTraining ? 'Live' : 'Idle'}
+              </span>
+            </div>
+          </div>
+          <div className="mil-scroll" style={{ flex: 1, overflowY: 'auto', maxHeight: '500px' }}>
+            {events.length === 0 ? (
+              <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--mil-text-muted)', fontSize: '0.75rem' }}>
+                Start training to see events
+              </div>
+            ) : (
+              events.map((evt) => (
+                <div key={evt.id} style={{
+                  display: 'flex',
+                  gap: '0.5rem',
+                  padding: '0.5rem 0.75rem',
+                  borderBottom: '1px solid var(--mil-border)',
+                  fontSize: '0.6875rem',
+                  alignItems: 'flex-start',
+                }}>
+                  <span style={{ color: 'var(--mil-text-muted)', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, fontSize: '0.625rem' }}>
+                    {evt.time}
+                  </span>
+                  {getEventIcon(evt.type)}
+                  <span style={{ color: getEventColor(evt.type) }}>{evt.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* AI Explanation Modal */}
+      {aiExplaining && (
+        <div className="mil-modal-overlay" onClick={closeExplanation}>
+          <div className="mil-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mil-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <MessageSquare size={16} style={{ color: 'var(--mil-cyan)' }} />
+                <span className="mil-card-title">AI Explanation</span>
+              </div>
+              <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={closeExplanation}>✕</button>
+            </div>
+            <div className="mil-modal-body">
+              <div className="mil-ai-message">
+                {aiExplanationText}
+                <span className="mil-ai-cursor" />
+              </div>
+            </div>
+            <div className="mil-modal-footer">
+              <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={closeExplanation}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </CommandLayout>
+  );
+}

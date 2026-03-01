@@ -1,0 +1,476 @@
+/**
+ * MONITORING & SETTINGS PAGE
+ * Unified monitoring, auth settings, user management
+ * Professional military-grade interface
+ */
+import { useState, useEffect, useMemo, FormEvent } from 'react';
+import {
+  Activity,
+  Shield,
+  Users,
+  Settings,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Clock,
+  Plus,
+  Trash2,
+  Lock,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  BarChart3,
+} from 'lucide-react';
+import CommandLayout from '@/layouts/CommandLayout';
+import { useAuth } from '@/hooks/useAuth';
+import { SERVICE_REGISTRY, INFRA_SERVICES, TOTAL_SERVICES, type ServiceDefinition } from '@/config/serviceRegistry';
+
+/* ── Use canonical registry ── */
+const MONITOR_SERVICES = SERVICE_REGISTRY;
+
+type HealthState = 'UP' | 'DOWN' | 'LOADING';
+
+const TABS = [
+  { id: 'monitoring', label: 'Service Monitoring', icon: Activity },
+  { id: 'auth', label: 'Authentication', icon: Shield },
+  { id: 'users', label: 'User Management', icon: Users },
+  { id: 'system', label: 'System Config', icon: Settings },
+] as const;
+
+interface TeamMember {
+  id: string;
+  name: string;
+  role: string;
+  permissions: string[];
+  status: string;
+}
+
+const DEFAULT_TEAM: TeamMember[] = [
+  { id: 'u1', name: 'Admin Operator', role: 'administrator', permissions: ['manage_services', 'view_metrics', 'manage_users'], status: 'active' },
+  { id: 'u2', name: 'Trading Operator', role: 'operator', permissions: ['view_dashboard', 'view_logs', 'execute_trades'], status: 'active' },
+];
+
+export default function MonitoringSettingsPage() {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<string>('monitoring');
+  const [health, setHealth] = useState<Record<string, HealthState>>(() =>
+    MONITOR_SERVICES.reduce((acc, s) => ({ ...acc, [s.id]: 'LOADING' as HealthState }), {} as Record<string, HealthState>)
+  );
+  const [latencies, setLatencies] = useState<Record<string, number>>({});
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(DEFAULT_TEAM);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
+  const [memberForm, setMemberForm] = useState({ name: '', role: 'operator', permissions: 'view_dashboard' });
+  const [logStream, setLogStream] = useState<Array<{ time: string; svc: string; status: string }>>([]);
+
+  // Health polling with latency tracking
+  useEffect(() => {
+    const checkAll = async () => {
+      for (const svc of MONITOR_SERVICES) {
+        const start = performance.now();
+        try {
+          const res = await fetch(svc.healthUrl, { signal: AbortSignal.timeout(3000) });
+          const elapsed = Math.round(performance.now() - start);
+          setHealth((prev) => ({ ...prev, [svc.id]: res.ok ? 'UP' : 'DOWN' }));
+          setLatencies((prev) => ({ ...prev, [svc.id]: elapsed }));
+          const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+          setLogStream((prev) => [{ time, svc: svc.name, status: res.ok ? 'OK' : 'FAIL' }, ...prev].slice(0, 100));
+        } catch {
+          setHealth((prev) => ({ ...prev, [svc.id]: 'DOWN' }));
+          setLatencies((prev) => ({ ...prev, [svc.id]: -1 }));
+        }
+      }
+    };
+    checkAll();
+    const interval = setInterval(checkAll, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const servicesUp = Object.values(health).filter((h) => h === 'UP').length;
+
+  const removeMember = (id: string) => {
+    setTeamMembers((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  const addMember = (e: FormEvent) => {
+    e.preventDefault();
+    if (!memberForm.name.trim()) return;
+    setTeamMembers((prev) => [
+      ...prev,
+      {
+        id: `u${Date.now()}`,
+        name: memberForm.name,
+        role: memberForm.role,
+        permissions: [memberForm.permissions],
+        status: 'active',
+      },
+    ]);
+    setMemberForm({ name: '', role: 'operator', permissions: 'view_dashboard' });
+  };
+
+  return (
+    <CommandLayout>
+      <div style={{ marginBottom: '1.25rem' }}>
+        <h1 className="text-tactical" style={{ fontSize: '1.125rem', color: 'var(--mil-text-primary)', marginBottom: '0.25rem' }}>
+          Monitoring & Settings
+        </h1>
+        <p style={{ fontSize: '0.75rem', color: 'var(--mil-text-tertiary)' }}>
+          Service health · Authentication · User management · System configuration
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="mil-tabs" style={{ marginBottom: '1.25rem' }}>
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              className={`mil-tab ${activeTab === tab.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <Icon size={12} style={{ marginRight: '0.375rem', verticalAlign: 'middle' }} />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ═══ MONITORING TAB ═══ */}
+      {activeTab === 'monitoring' && (
+        <div>
+          {/* Summary Strip */}
+          <div className="mil-grid mil-grid-4" style={{ marginBottom: '1.25rem' }}>
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Online</span>
+              <span className="mil-stat-value" style={{ color: 'var(--mil-green)' }}>{servicesUp}</span>
+            </div>
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Offline</span>
+              <span className="mil-stat-value" style={{ color: servicesUp < MONITOR_SERVICES.length ? 'var(--mil-red)' : 'var(--mil-text-primary)' }}>
+                {MONITOR_SERVICES.length - servicesUp}
+              </span>
+            </div>
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Avg Latency</span>
+              <span className="mil-stat-value" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '1.125rem' }}>
+                {Object.values(latencies).filter((l) => l > 0).length > 0
+                  ? Math.round(Object.values(latencies).filter((l) => l > 0).reduce((a, b) => a + b, 0) / Object.values(latencies).filter((l) => l > 0).length)
+                  : '--'}ms
+              </span>
+            </div>
+            <div className="mil-stat-card">
+              <span className="mil-stat-label">Total Services</span>
+              <span className="mil-stat-value">{MONITOR_SERVICES.length}</span>
+            </div>
+          </div>
+
+          {/* Service Table */}
+          <div className="mil-card">
+            <div className="mil-card-header">
+              <span className="mil-card-title">Service Health Matrix</span>
+              <button className="mil-btn mil-btn-sm mil-btn-ghost" onClick={() => window.location.reload()}>
+                <RefreshCw size={12} /> Refresh
+              </button>
+            </div>
+            <div className="mil-card-body" style={{ padding: 0 }}>
+              <table className="mil-table">
+                <thead>
+                  <tr>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Port</th>
+                    <th>Latency</th>
+                    <th>Endpoint</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MONITOR_SERVICES.map((svc) => {
+                    const status = health[svc.id];
+                    const lat = latencies[svc.id];
+                    return (
+                      <tr key={svc.id}>
+                        <td style={{ fontWeight: 600, color: 'var(--mil-text-primary)' }}>
+                          {svc.name}
+                        </td>
+                        <td>
+                          <span className={`mil-badge ${status === 'UP' ? 'mil-badge-online' : status === 'DOWN' ? 'mil-badge-error' : 'mil-badge-info'}`}>
+                            {status === 'UP' ? 'ONLINE' : status === 'DOWN' ? 'OFFLINE' : 'PROBING'}
+                          </span>
+                        </td>
+                        <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem' }}>{svc.port}</td>
+                        <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: lat && lat > 0 ? (lat < 100 ? 'var(--mil-green)' : lat < 500 ? 'var(--mil-amber)' : 'var(--mil-red)') : 'var(--mil-text-muted)' }}>
+                          {lat && lat > 0 ? `${lat}ms` : '--'}
+                        </td>
+                        <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.6875rem', color: 'var(--mil-text-muted)' }}>
+                          {svc.healthUrl}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Health Log */}
+          <div className="mil-card" style={{ marginTop: '1.25rem' }}>
+            <div className="mil-card-header">
+              <span className="mil-card-title">Health Check Log</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--mil-green)', animation: 'pulse-dot 2s infinite' }} />
+                <span style={{ fontSize: '0.5625rem', color: 'var(--mil-text-muted)', textTransform: 'uppercase' }}>Live</span>
+              </div>
+            </div>
+            <div className="mil-log-viewer mil-scroll" style={{ maxHeight: '250px' }}>
+              {logStream.map((entry, i) => (
+                <div key={i} className="mil-log-entry">
+                  <span className="mil-log-time">{entry.time}</span>
+                  <span className={`mil-log-level ${entry.status === 'OK' ? 'info' : 'error'}`}>{entry.status}</span>
+                  <span className="mil-log-msg">{entry.svc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ AUTH TAB ═══ */}
+      {activeTab === 'auth' && (
+        <div style={{ maxWidth: '640px' }}>
+          <div className="mil-card" style={{ marginBottom: '1.25rem' }}>
+            <div className="mil-card-header">
+              <span className="mil-card-title">Authentication Settings</span>
+            </div>
+            <div className="mil-card-body">
+              <div className="mil-form-group">
+                <label className="mil-form-label">Email / Identifier</label>
+                <input
+                  type="text"
+                  className="mil-form-input"
+                  value={user?.email || ''}
+                  readOnly
+                  style={{ opacity: 0.7 }}
+                />
+              </div>
+              <div className="mil-form-group">
+                <label className="mil-form-label">Current Password</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    className="mil-form-input"
+                    placeholder="Enter current password"
+                  />
+                  <button
+                    style={{
+                      position: 'absolute',
+                      right: '0.75rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--mil-text-muted)',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+              <div className="mil-form-group">
+                <label className="mil-form-label">New Password</label>
+                <input type="password" className="mil-form-input" placeholder="Enter new password" />
+              </div>
+              <button className="mil-btn mil-btn-primary" style={{ marginTop: '0.5rem' }}>
+                <Lock size={14} /> Update Password
+              </button>
+            </div>
+          </div>
+
+          <div className="mil-card">
+            <div className="mil-card-header">
+              <span className="mil-card-title">Two-Factor Authentication</span>
+            </div>
+            <div className="mil-card-body">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--mil-text-primary)', marginBottom: '0.25rem' }}>
+                    2FA {twoFactorEnabled ? 'Enabled' : 'Disabled'}
+                  </div>
+                  <div style={{ fontSize: '0.6875rem', color: 'var(--mil-text-tertiary)' }}>
+                    {twoFactorEnabled
+                      ? 'Your account is secured with two-factor authentication'
+                      : 'Enable 2FA for enhanced security'}
+                  </div>
+                </div>
+                <button
+                  className={`mil-btn ${twoFactorEnabled ? 'mil-btn-danger' : 'mil-btn-primary'} mil-btn-sm`}
+                  onClick={() => setTwoFactorEnabled(!twoFactorEnabled)}
+                >
+                  {twoFactorEnabled ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mil-card" style={{ marginTop: '1.25rem' }}>
+            <div className="mil-card-header">
+              <span className="mil-card-title">Session Management</span>
+            </div>
+            <div className="mil-card-body">
+              <div style={{ fontSize: '0.8125rem', color: 'var(--mil-text-secondary)', marginBottom: '0.75rem' }}>
+                Active sessions and access tokens
+              </div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.625rem 0.75rem',
+                background: 'var(--mil-bg-primary)',
+                borderRadius: 'var(--mil-radius-md)',
+                border: '1px solid var(--mil-border)',
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--mil-text-primary)' }}>Current Session</div>
+                  <div style={{ fontSize: '0.625rem', color: 'var(--mil-text-muted)' }}>Active · Last activity: just now</div>
+                </div>
+                <span className="mil-badge mil-badge-online">Active</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ USERS TAB ═══ */}
+      {activeTab === 'users' && (
+        <div>
+          <div className="mil-card" style={{ marginBottom: '1.25rem' }}>
+            <div className="mil-card-header">
+              <span className="mil-card-title">Team Members</span>
+              <span style={{ fontSize: '0.625rem', color: 'var(--mil-text-muted)' }}>
+                {teamMembers.length} members
+              </span>
+            </div>
+            <div className="mil-card-body" style={{ padding: 0 }}>
+              <table className="mil-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Permissions</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamMembers.map((member) => (
+                    <tr key={member.id}>
+                      <td style={{ fontWeight: 600, color: 'var(--mil-text-primary)' }}>{member.name}</td>
+                      <td style={{ textTransform: 'capitalize' }}>{member.role}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                          {member.permissions.map((p) => (
+                            <span key={p} className="mil-badge mil-badge-info">{p}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>
+                        <span className="mil-badge mil-badge-online">{member.status}</span>
+                      </td>
+                      <td>
+                        <button
+                          className="mil-btn mil-btn-sm mil-btn-ghost"
+                          onClick={() => removeMember(member.id)}
+                          style={{ color: 'var(--mil-red)' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Add Member Form */}
+          <div className="mil-card" style={{ maxWidth: '500px' }}>
+            <div className="mil-card-header">
+              <span className="mil-card-title">Add Team Member</span>
+            </div>
+            <div className="mil-card-body">
+              <form onSubmit={addMember}>
+                <div className="mil-form-group">
+                  <label className="mil-form-label">Name</label>
+                  <input
+                    type="text"
+                    className="mil-form-input"
+                    value={memberForm.name}
+                    onChange={(e) => setMemberForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="Enter member name"
+                  />
+                </div>
+                <div className="mil-form-group">
+                  <label className="mil-form-label">Role</label>
+                  <select
+                    className="mil-form-input"
+                    value={memberForm.role}
+                    onChange={(e) => setMemberForm((p) => ({ ...p, role: e.target.value }))}
+                  >
+                    <option value="operator">Operator</option>
+                    <option value="engineer">Engineer</option>
+                    <option value="administrator">Administrator</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                </div>
+                <button type="submit" className="mil-btn mil-btn-primary">
+                  <Plus size={14} /> Add Member
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ SYSTEM CONFIG TAB ═══ */}
+      {activeTab === 'system' && (
+        <div style={{ maxWidth: '640px' }}>
+          <div className="mil-card" style={{ marginBottom: '1.25rem' }}>
+            <div className="mil-card-header">
+              <span className="mil-card-title">System Configuration</span>
+            </div>
+            <div className="mil-card-body">
+              <div className="mil-form-group">
+                <label className="mil-form-label">Default Symbol</label>
+                <input type="text" className="mil-form-input" defaultValue="Volatility_25" />
+              </div>
+              <div className="mil-form-group">
+                <label className="mil-form-label">Default Timeframe</label>
+                <select className="mil-form-input" defaultValue="M1">
+                  <option value="M1">M1 (1 Minute)</option>
+                  <option value="M5">M5 (5 Minutes)</option>
+                  <option value="M15">M15 (15 Minutes)</option>
+                  <option value="H1">H1 (1 Hour)</option>
+                  <option value="H4">H4 (4 Hours)</option>
+                  <option value="D1">D1 (Daily)</option>
+                </select>
+              </div>
+              <div className="mil-form-group">
+                <label className="mil-form-label">API Gateway URL</label>
+                <input type="text" className="mil-form-input" defaultValue="http://localhost:52051" />
+              </div>
+              <div className="mil-form-group">
+                <label className="mil-form-label">Auth Service URL</label>
+                <input type="text" className="mil-form-input" defaultValue="http://localhost:5500" />
+              </div>
+              <button className="mil-btn mil-btn-primary" style={{ marginTop: '0.5rem' }}>
+                <Settings size={14} /> Save Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </CommandLayout>
+  );
+}

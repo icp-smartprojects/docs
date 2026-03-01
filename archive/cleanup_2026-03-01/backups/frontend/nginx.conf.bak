@@ -1,0 +1,345 @@
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    gzip on;
+    gzip_disable "msie6";
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
+
+    server {
+        listen 80;
+        server_name localhost;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # Docker embedded DNS — resolves service names at runtime, not startup.
+        # This prevents Nginx from crashing if a service is temporarily down.
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        resolver_timeout 5s;
+
+        # SPA routing: all routes serve index.html
+        location / {
+            try_files $uri $uri/ /index.html;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+
+        # ── Health-check proxy (same-origin for browser fetch) ──
+        # Uses variables so DNS is resolved per-request, not at startup.
+        # If service is down, returns 502 instead of crashing the whole server.
+        location = /health-proxy/core-brain           { set $upstream_core_brain           core-brain:52040;           proxy_pass http://$upstream_core_brain/health;             proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/perception           { set $upstream_perception           perception:52012;           proxy_pass http://$upstream_perception/health;             proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/reasoning-engine     { set $upstream_reasoning            reasoning-engine:52008;     proxy_pass http://$upstream_reasoning/health;              proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/meaning-engine       { set $upstream_meaning              meaning-engine:52003;       proxy_pass http://$upstream_meaning/health;                proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/language-intelligence { set $upstream_lang                 language-intelligence:52006; proxy_pass http://$upstream_lang/health;                  proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/knowledge-graph      { set $upstream_kg                   knowledge-graph:52015;      proxy_pass http://$upstream_kg/health;                     proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/ontology             { set $upstream_ontology             ontology:52100;             proxy_pass http://$upstream_ontology/health;               proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/shape-engine         { set $upstream_shape                shape-engine:52010;         proxy_pass http://$upstream_shape/health;                  proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/learning-engine      { set $upstream_learning             learning-engine:52004;      proxy_pass http://$upstream_learning/health;               proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/memory               { set $upstream_memory               memory:52018;               proxy_pass http://$upstream_memory/health;                 proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/explanation-engine    { set $upstream_explanation          explanation-engine:52005;    proxy_pass http://$upstream_explanation/health;            proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/simulation           { set $upstream_simulation           simulation:52043;           proxy_pass http://$upstream_simulation/health;             proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/market-ingestion     { set $upstream_ingestion            market-ingestion:52010;     proxy_pass http://$upstream_ingestion/health;              proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/candle-constructor   { set $upstream_candle               candle-constructor:52023;   proxy_pass http://$upstream_candle/health;                 proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/price-observer       { set $upstream_price                price-observer:52002;       proxy_pass http://$upstream_price/health;                  proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/event-bus            { set $upstream_eventbus             event-bus:52020;            proxy_pass http://$upstream_eventbus/health;               proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/gateway              { set $upstream_gateway              gateway:52031;              proxy_pass http://$upstream_gateway/healthz;               proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/schema-registry      { set $upstream_schema               schema-registry:52025;      proxy_pass http://$upstream_schema/api/v1/health;         proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/policy-engine        { set $upstream_policy               policy-engine:52032;        proxy_pass http://$upstream_policy/health;                 proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/auth-system          { set $upstream_auth                 auth-service:5500;          proxy_pass http://$upstream_auth/health;                   proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/security-core        { set $upstream_security             security-core:55000;        proxy_pass http://$upstream_security/health;               proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/monitoring-dashboard { set $upstream_monitoring            monitoring-dashboard:8080;  proxy_pass http://$upstream_monitoring/api/health;         proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+        location = /health-proxy/topology-hub         { set $upstream_topology             topology-hub:8080;          proxy_pass http://$upstream_topology/health;               proxy_connect_timeout 3s; proxy_read_timeout 3s; }
+
+        # ── Service proxies (same-origin for frontend fetch) ──
+        location /svc/perception/ {
+            set $upstream_svc_perception perception:52012;
+            rewrite ^/svc/perception/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_perception;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/explanation/ {
+            set $upstream_svc_explanation explanation-engine:52005;
+            rewrite ^/svc/explanation/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_explanation;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/learning/ {
+            set $upstream_svc_learning learning-engine:52004;
+            rewrite ^/svc/learning/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_learning;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/memory/ {
+            set $upstream_svc_memory memory:52018;
+            rewrite ^/svc/memory/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_memory;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/simulation/ {
+            set $upstream_svc_simulation simulation:52043;
+            rewrite ^/svc/simulation/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_simulation;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/price/ {
+            set $upstream_svc_price price-observer:52002;
+            rewrite ^/svc/price/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_price;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/policy/ {
+            set $upstream_svc_policy policy-engine:52032;
+            rewrite ^/svc/policy/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_policy;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/reasoning/ {
+            set $upstream_svc_reasoning reasoning-engine:52008;
+            rewrite ^/svc/reasoning/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_reasoning;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/gateway/ {
+            set $upstream_svc_gateway gateway:52031;
+            rewrite ^/svc/gateway/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_gateway;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/auth/ {
+            set $upstream_svc_auth auth-service:5500;
+            rewrite ^/svc/auth/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_auth;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/kg/ {
+            set $upstream_svc_kg knowledge-graph:52015;
+            rewrite ^/svc/kg/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_kg;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/ontology/ {
+            set $upstream_svc_ontology ontology:52100;
+            rewrite ^/svc/ontology/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_ontology;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/core-brain/ {
+            set $upstream_svc_corebrain core-brain:52040;
+            rewrite ^/svc/core-brain/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_corebrain;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/event-bus/ {
+            set $upstream_svc_eventbus event-bus:52020;
+            rewrite ^/svc/event-bus/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_eventbus;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_read_timeout 10s;
+        }
+        location /svc/candles/ {
+            set $upstream_svc_candles candle-constructor:52023;
+            rewrite ^/svc/candles/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_candles;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Connection '';
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_read_timeout 300s;
+        }
+        location /svc/meaning/ {
+            set $upstream_svc_meaning meaning-engine:52003;
+            rewrite ^/svc/meaning/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_meaning;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/shapes/ {
+            set $upstream_svc_shapes shape-engine:52010;
+            rewrite ^/svc/shapes/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_shapes;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+        location /svc/engine/ {
+            set $upstream_svc_engine candle-constructor:52023;
+            rewrite ^/svc/engine/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_engine;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        location /svc/engine-ctrl/ {
+            proxy_pass http://host.docker.internal:52060/;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_read_timeout 300s;
+            proxy_buffering off;
+        }
+        location /svc/language-intelligence/ {
+            proxy_pass http://language-intelligence:52006/;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        location /svc/market-ingestion/ {
+            proxy_pass http://market-ingestion:52024/;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        location /svc/schema-registry/ {
+            proxy_pass http://schema-registry:52025/;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        location /svc/security/ {
+            proxy_pass http://security-core:55000/;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        location /svc/topology/ {
+            set $upstream_svc_topology topology-hub:8080;
+            rewrite ^/svc/topology/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_topology;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 300s;
+        }
+        location /svc/price-observer/ {
+            set $upstream_svc_priceobs price-observer:52002;
+            rewrite ^/svc/price-observer/(.*) /$1 break;
+            proxy_pass http://$upstream_svc_priceobs;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 10s;
+        }
+
+        # API proxy (to backend services)
+        location /api/ {
+            set $upstream_api gateway:52031;
+            proxy_pass http://$upstream_api;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+        }
+
+        # WebSocket proxy
+        location /ws/ {
+            set $upstream_ws gateway:52031;
+            proxy_pass http://$upstream_ws;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "Upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss: http://localhost:* https://localhost:*;" always;
+
+        # Caching for static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires -1;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+
+        # Disable caching for index.html
+        location = /index.html {
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+    }
+}
