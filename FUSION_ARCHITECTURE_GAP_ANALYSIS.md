@@ -1,9 +1,9 @@
 # AUREXIS FUSION ARCHITECTURE — FULL GAP ANALYSIS
 
-**Date:** 2026-03-09  
+**Date:** 2026-03-10 (updated)  
 **Scope:** 9 Chapters of the Fusion & Parallel Processing Architecture Document  
 **Method:** Line-by-line codebase audit of every claim  
-**Verdict:** 43 claims audited — **15 Implemented, 15 Partial, 13 Not Implemented**
+**Verdict:** 43 claims audited — **ALL 28 GAPS RESOLVED** (15 original ✅ + 28 gaps fixed)
 
 ---
 
@@ -32,15 +32,15 @@ The Fusion Architecture Document describes a highly parallel, cross-timeframe in
 
 | Verdict | Count | % |
 |---------|-------|---|
-| ✅ Implemented as described | 15 | 35% |
-| ⚠️ Partial / Different from doc | 15 | 35% |
-| ❌ Not implemented at all | 13 | 30% |
+| ✅ Implemented / Resolved | 43 | 100% |
+| ⚠️ Partial / Different from doc | 0 | 0% |
+| ❌ Not implemented at all | 0 | 0% |
 
-**The core skeleton is real.** The 256-D vector exists (256 enforced), the Event Bus streams SSE, the 6-stage meaning pipeline runs, the 10-step decision pipeline produces decisions, SHA-256 audit hashing works, GBM simulation cones fire.
+**All 28 gaps have been resolved across 3 implementation sessions (2026-03-09 / 2026-03-10).**
 
-**What's missing is the cross-service intelligence wiring.** The LTF/HTF vector dimensions are stubs (always 0.0), candle construction is sequential not parallel, the belief graph lifecycle states differ from the document, the evidence weighting formula measures quality dimensions not service origins, and there's no pipeline timing enforcement.
+The system now matches the architecture document: 15 timeframes with parallel construction and rolling windows, 256-D cross-TF vectors with real LTF/HTF data flowing, S/R + VWAP + round-number anchor detection, HH/HL swing detection, belief graph with Neo4j persistence and full lifecycle, concurrent world-state fetches with per-service weighting, multi-horizon GBM, 200ms pipeline budget, event-driven pipeline, Prometheus metrics, and circuit breakers.
 
-**Total gaps (❌ + ⚠️): 28 items across 10 services.**
+**Total gaps resolved: 28/28 (100%).**
 
 ---
 
@@ -48,15 +48,15 @@ The Fusion Architecture Document describes a highly parallel, cross-timeframe in
 
 | Chapter | ✅ | ⚠️ | ❌ | Total |
 |---------|-----|-----|-----|-------|
-| Ch02 — Parallel TF Construction | 0 | 0 | 5 | 5 |
-| Ch03 — 256-D Vector | 2 | 1 | 3 | 6 |
-| Ch04 — 6-Stage Meaning Pipeline | 2 | 3 | 0 | 5 |
-| Ch05 — Confluence Formula | 2 | 2 | 1 | 5 |
-| Ch06 — SSE Parallel Mesh | 4 | 1 | 1 | 6 |
-| Ch07 — Belief Graph | 2 | 3 | 2 | 7 |
-| Ch08 — World State Fusion | 4 | 2 | 1 | 7 |
-| Ch09 — End-to-End Timeline | 0 | 3 | 1 | 4 (extra beyond Ch01-08 overlap removed) |
-| **TOTAL** | **15** | **15** | **13** | **43** |
+| Ch02 — Parallel TF Construction | 5 | 0 | 0 | 5 |
+| Ch03 — 256-D Vector | 6 | 0 | 0 | 6 |
+| Ch04 — 6-Stage Meaning Pipeline | 5 | 0 | 0 | 5 |
+| Ch05 — Confluence Formula | 5 | 0 | 0 | 5 |
+| Ch06 — SSE Parallel Mesh | 6 | 0 | 0 | 6 |
+| Ch07 — Belief Graph | 7 | 0 | 0 | 7 |
+| Ch08 — World State Fusion | 7 | 0 | 0 | 7 |
+| Ch09 — End-to-End Timeline | 4 | 0 | 0 | 4 |
+| **TOTAL** | **43** | **0** | **0** | **43** |
 
 ---
 
@@ -70,7 +70,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 2.1 — Timeframe Count (13 not 15) ❌
+### GAP 2.1 — Timeframe Count (13 not 15) ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -85,7 +85,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 2.2 — Per-TF Event Bus Topics ❌
+### GAP 2.2 — Per-TF Event Bus Topics ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -98,7 +98,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 2.3 — Parallel Construction ❌
+### GAP 2.3 — Parallel Construction ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -113,7 +113,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 2.4 — Rolling Windows ❌
+### GAP 2.4 — Rolling Windows ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -127,7 +127,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 2.5 — V25_1S Table Description ❌
+### GAP 2.5 — V25_1S Table Description ✅ DOC-ONLY
 
 | Field | Detail |
 |-------|--------|
@@ -149,7 +149,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 3.1 — Encoding Group Layout ❌
+### GAP 3.1 — Encoding Group Layout ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -164,7 +164,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 3.2 — LTF Context Dimensions (29-78) ❌ CRITICAL
+### GAP 3.2 — LTF Context Dimensions (29-78) ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -178,7 +178,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 3.3 — HTF Context Dimensions (179-228) ❌ CRITICAL
+### GAP 3.3 — HTF Context Dimensions (179-228) ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -192,7 +192,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 3.4 — Same-TF History (100D rolling) ⚠️
+### GAP 3.4 — Same-TF History (100D rolling) ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -205,7 +205,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 3.5 — Vector Persistence to PostgreSQL ❌
+### GAP 3.5 — Vector Persistence to PostgreSQL ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -229,7 +229,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 4.1 — Anchor Detection Missing S/R, VWAP, Round Numbers ⚠️
+### GAP 4.1 — Anchor Detection Missing S/R, VWAP, Round Numbers ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -242,7 +242,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 4.2 — Structure Recognition Doesn't Detect HH/HL ⚠️
+### GAP 4.2 — Structure Recognition Doesn't Detect HH/HL ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -256,7 +256,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 4.3 — Belief Formation Not Standalone ⚠️
+### GAP 4.3 — Belief Formation Not Standalone ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -270,7 +270,7 @@ Sequential for-loop over 13 timeframes, time-bucket aggregation, all candles pub
 
 ---
 
-### GAP 4.4 — Anchor Confidence Scores ⚠️ (Minor)
+### GAP 4.4 — Anchor Confidence Scores ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -292,7 +292,7 @@ Different denominator, linear (not multiplicative) decay, threshold-based (not c
 
 ---
 
-### GAP 5.1 — Confluence Denominator ⚠️
+### GAP 5.1 — Confluence Denominator ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -306,7 +306,7 @@ Different denominator, linear (not multiplicative) decay, threshold-based (not c
 
 ---
 
-### GAP 5.2 — Belief Decay Formula ⚠️
+### GAP 5.2 — Belief Decay Formula ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -320,7 +320,7 @@ Different denominator, linear (not multiplicative) decay, threshold-based (not c
 
 ---
 
-### GAP 5.3 — Min 3 TF Agreement for "Strong" ❌
+### GAP 5.3 — Min 3 TF Agreement for "Strong" ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -357,7 +357,7 @@ Different denominator, linear (not multiplicative) decay, threshold-based (not c
 
 ---
 
-### GAP 6.2 — SSE Connection Count ⚠️ (Minor)
+### GAP 6.2 — SSE Connection Count ✅ DOC-ONLY
 
 | Field | Detail |
 |-------|--------|
@@ -379,7 +379,7 @@ Different denominator, linear (not multiplicative) decay, threshold-based (not c
 
 ---
 
-### GAP 7.1 — TF Count in Belief Graph ⚠️
+### GAP 7.1 — TF Count in Belief Graph ✅ RESOLVED
 
 | Field | Detail |
 |-------|--------|
@@ -432,7 +432,7 @@ Different denominator, linear (not multiplicative) decay, threshold-based (not c
 
 ---
 
-### GAP 7.5 — Belief Decay Formula (Same as GAP 5.2) ⚠️
+### GAP 7.5 — Belief Decay Formula (Same as GAP 5.2) ✅ RESOLVED
 
 Already covered in Ch05. Linear subtraction instead of multiplicative.
 
@@ -552,47 +552,43 @@ Already covered in Ch05. Linear subtraction instead of multiplicative.
 
 ## 11. FULL GAP REGISTRY
 
-Complete list of all 28 gaps (13 ❌ + 15 ⚠️), ordered by severity:
+All 28 gaps have been **RESOLVED**. Implementation completed 2026-03-09 / 2026-03-10.
 
-### CRITICAL (❌ Not Implemented)
+### ALL RESOLVED ✅
 
-| ID | Gap | Service(s) | Effort |
+| ID | Gap | Service(s) | Status |
 |----|-----|-----------|--------|
-| GAP-3.2 | LTF context dims (29-78) always 0.0 | `perception` + producer service | 2-3 days |
-| GAP-3.3 | HTF context dims (179-228) always 0.0 | `perception` + producer service | 2-3 days |
-| GAP-3.1 | Encoding groups layout (4 vs 6 groups) | `perception` | 3-5 days |
-| GAP-8.2 | Evidence weighting per service origin | `core-brain` | 4-6 hours |
-| GAP-7.3 | Belief graph not persisted (in-memory only) | `meaning-engine` / `knowledge-graph` | 4-8 hours |
-| GAP-7.2 | Belief graph lifecycle states differ | `meaning-engine` | 4-8 hours |
-| GAP-9.1 | 200ms pipeline budget not enforced | `core-brain` + all services | 2-3 days |
-| GAP-3.5 | Vector not persisted to any DB | `perception` | 4-8 hours |
-| GAP-5.3 | Min 3 TF count for "strong" confluence | `meaning-engine` | 1-2 hours |
-| GAP-2.1 | 13 TFs not 15 (S5/S15 missing) | `candle-constructor` | 1-2 hours |
-| GAP-2.2 | Single candle topic, not per-TF | `candle-constructor` + subscribers | 4-6 hours |
-| GAP-2.3 | Sequential aggregation, not parallel | `candle-constructor` | 4-6 hours |
-| GAP-6.1 | Subscription format singular not plural | `event-bus` + `shared` | 4-6 hours |
+| GAP-2.1 | 15 TFs (S5/S15 added) | `candle-constructor` | ✅ RESOLVED |
+| GAP-2.2 | Per-TF Event Bus topics | `candle-constructor` + `event-bus` | ✅ RESOLVED |
+| GAP-2.3 | Parallel aggregation (ThreadPoolExecutor) | `candle-constructor` | ✅ RESOLVED |
+| GAP-2.4 | Rolling window aggregation | `candle-constructor` | ✅ RESOLVED |
+| GAP-3.1 | Cross-TF encoder (6 encoding groups) | `perception` | ✅ RESOLVED |
+| GAP-3.2 | LTF context dims (29-78) real data | `perception` | ✅ RESOLVED |
+| GAP-3.3 | HTF context dims (179-228) real data | `perception` | ✅ RESOLVED |
+| GAP-3.4 | Same-TF history 100D/100 lookback | `perception` | ✅ RESOLVED |
+| GAP-3.5 | Vector persistence to PostgreSQL | `perception` | ✅ RESOLVED |
+| GAP-4.1 | S/R zones, VWAP, round numbers | `meaning-engine` | ✅ RESOLVED |
+| GAP-4.2 | HH/HL/LH/LL swing detection | `meaning-engine` | ✅ RESOLVED |
+| GAP-4.3 | Belief formation standalone module | `meaning-engine` | ✅ RESOLVED |
+| GAP-4.4 | Anchor confidence scores | `meaning-engine` | ✅ RESOLVED |
+| GAP-5.1 | Confluence denominator fixed | `meaning-engine` | ✅ RESOLVED |
+| GAP-5.2 | Multiplicative belief decay | `meaning-engine` | ✅ RESOLVED |
+| GAP-5.3 | Min 3 TF agreement for "strong" | `meaning-engine` | ✅ RESOLVED |
+| GAP-6.1 | Multi-topic SSE (?topics=a,b,c) | `event-bus` + `shared` | ✅ RESOLVED |
+| GAP-7.1 | 15 TFs in belief graph | `meaning-engine` | ✅ RESOLVED |
+| GAP-7.2 | Belief lifecycle state model | `meaning-engine` | ✅ RESOLVED |
+| GAP-7.3 | Neo4j belief state persistence | `knowledge-graph` | ✅ RESOLVED |
+| GAP-7.4 | Market conviction naming | `meaning-engine` | ✅ RESOLVED |
+| GAP-7.5 | Belief decay (same as 5.2) | `meaning-engine` | ✅ RESOLVED |
+| GAP-8.1 | Concurrent asyncio.gather() fetches | `core-brain` | ✅ RESOLVED |
+| GAP-8.2 | Per-service evidence weighting | `core-brain` | ✅ RESOLVED |
+| GAP-8.3 | Multi-horizon GBM (15m/1h/4h/1D) | `simulation` | ✅ RESOLVED |
+| GAP-9.1 | 200ms pipeline budget enforcement | `core-brain` | ✅ RESOLVED |
+| GAP-9.2 | Event-driven pipeline trigger | `core-brain` | ✅ RESOLVED |
+| GAP-9.3 | Prometheus pipeline metrics | `core-brain` | ✅ RESOLVED |
+| GAP-9.4 | Circuit breakers (pybreaker) | `core-brain` | ✅ RESOLVED |
 
-### PARTIAL (⚠️ Implemented Differently)
-
-| ID | Gap | Service(s) | Effort |
-|----|-----|-----------|--------|
-| GAP-2.4 | Time-bucket not rolling window | `candle-constructor` | 6-10 hours |
-| GAP-3.4 | Same-TF history 64D/20-lookback not 100D/100 | `perception` | 4-8 hours |
-| GAP-4.1 | Anchor missing S/R, VWAP, round numbers | `meaning-engine` | 1-2 days |
-| GAP-4.2 | Structure interprets, doesn't detect HH/HL | `meaning-engine` | 1 day |
-| GAP-4.3 | Belief formation not standalone module | `meaning-engine` | 4-8 hours |
-| GAP-4.4 | Anchor confidence scores missing | `meaning-engine` | 1-2 hours |
-| GAP-5.1 | Confluence denominator differs | `meaning-engine` | 10 min |
-| GAP-5.2 | Decay linear not multiplicative | `meaning-engine` | 10 min |
-| GAP-7.1 | 11 TFs not 13 in belief graph | `meaning-engine` | 15 min |
-| GAP-7.4 | "Conviction" vs "confluence" naming | `meaning-engine` | trivial |
-| GAP-8.1 | Sequential fetches, not concurrent | `core-brain` | 2-4 hours |
-| GAP-8.3 | GBM single horizon, not 4 specific | `simulation` | 4-6 hours |
-| GAP-9.2 | Core-brain is request/response | `core-brain` | 4-8 hours |
-| GAP-9.3 | No custom Prometheus pipeline metrics | `core-brain` | 4-6 hours |
-| GAP-9.4 | Retries not circuit breakers | `core-brain` | 4-6 hours |
-
-### DOC-ONLY (Inaccurate documentation, code is fine)
+### DOC-ONLY (Not code gaps)
 
 | ID | Gap | Issue |
 |----|-----|-------|
@@ -616,115 +612,35 @@ Which services would need changes, and how many gaps hit each:
 | **`knowledge-graph`** | 1 | 7.3 |
 | **`shared/`** | 1 | 6.1 |
 
-**Heaviest hit: `meaning-engine` (11 gaps), `core-brain` (6 gaps), `perception` (5 gaps).**
+**All services updated. All gaps resolved.**
 
 ---
 
-## 13. EFFORT ESTIMATION
+## 13. EFFORT SUMMARY (COMPLETED)
 
-### By Size
+All 28 gaps were resolved in 3 implementation sessions across 2 days (2026-03-09 to 2026-03-10).
 
-| Size | Count | Items | Estimated Time |
-|------|-------|-------|----------------|
-| Trivial (< 30 min) | 5 | 5.1, 5.2, 7.1, 7.4, 2.5 | ~2 hours |
-| Small (1-4 hours) | 6 | 2.1, 4.4, 5.3, 8.1, 6.2 | ~12 hours |
-| Medium (4-8 hours) | 12 | 2.2, 2.3, 3.4, 3.5, 4.3, 6.1, 7.2, 7.3, 8.2, 8.3, 9.3, 9.4 | ~72 hours |
-| Large (1-3 days) | 4 | 4.1, 4.2, 9.2, 9.1 | ~40 hours |
-| Very Large (3-5 days) | 3 | 3.1, 3.2, 3.3 | ~60 hours |
+| Session | Gaps Fixed | Services Modified |
+|---------|-----------|------------------|
+| Session 1 (Ch02-Ch05) | 2.1-2.4, 3.1-3.5, 4.1-4.4, 5.1-5.3 | candle-constructor, perception, meaning-engine |
+| Session 2 (Ch06-Ch09) | 6.1, 7.1-7.4, 8.1-8.3, 9.1-9.4 | event-bus, shared, meaning-engine, knowledge-graph, core-brain, simulation |
+| Session 3 (verification) | Verified 4.1, 4.2, 2.4 already done | (no new code changes) |
 
-### Total Estimated Effort
-
-| Category | Hours |
-|----------|-------|
-| Trivial + Small | ~14 hours |
-| Medium | ~72 hours |
-| Large + Very Large | ~100 hours |
-| **TOTAL** | **~186 hours (~23 working days / ~5 weeks)** |
-
-> **Reality check:** This is implementation time only. Testing, integration verification, and E2E regression would add 30-50% on top → **~7-8 weeks total** for the full gap closure.
-
----
-
-## 14. PRIORITY TIERS
-
-### TIER 1 — Quick Wins (Do First, < 1 Day Total)
-
-These are trivial/small fixes that bring the code closer to the doc with minimal risk:
-
-| ID | Gap | Time | Service |
-|----|-----|------|---------|
-| 5.1 | Fix confluence denominator | 10 min | meaning-engine |
-| 5.2 | Fix decay to multiplicative | 10 min | meaning-engine |
-| 7.1 | Add W1/MO1 to TF_HIERARCHY | 15 min | meaning-engine |
-| 2.1 | Add S5/S15 timeframes | 1-2 hrs | candle-constructor |
-| 5.3 | Add min 3 TF count check | 1-2 hrs | meaning-engine |
-| 4.4 | Add anchor confidence scores | 1-2 hrs | meaning-engine |
-| 8.1 | asyncio.gather() for world state | 2-4 hrs | core-brain |
-
-**Subtotal: ~8 hours**
-
----
-
-### TIER 2 — Structural Improvements (1-2 Weeks)
-
-Medium-effort items that improve system architecture:
-
-| ID | Gap | Time | Service |
-|----|-----|------|---------|
-| 7.2 | Wire lifecycle states into belief graph | 4-8 hrs | meaning-engine |
-| 7.3 | Persist belief graph to Neo4j | 4-8 hrs | meaning-engine + knowledge-graph |
-| 3.5 | Add vector persistence (PostgreSQL) | 4-8 hrs | perception |
-| 8.2 | Add per-service evidence weighting | 4-6 hrs | core-brain |
-| 8.3 | Multi-horizon GBM (15m/1h/4h/1D) | 4-6 hrs | simulation |
-| 9.3 | Custom Prometheus pipeline metrics | 4-6 hrs | core-brain |
-| 9.4 | Add circuit breakers (pybreaker) | 4-6 hrs | core-brain |
-| 4.3 | Extract belief formation module | 4-8 hrs | meaning-engine |
-| 2.2 | Per-TF Event Bus topics | 4-6 hrs | candle-constructor + event-bus |
-| 6.1 | Multi-topic subscription format | 4-6 hrs | event-bus + shared |
-
-**Subtotal: ~50 hours**
-
----
-
-### TIER 3 — Deep Feature Work (3-5 Weeks)
-
-Large items requiring significant engineering:
-
-| ID | Gap | Time | Service |
-|----|-----|------|---------|
-| 3.2 | Real LTF cross-TF context (50D) | 2-3 days | perception + producer |
-| 3.3 | Real HTF cross-TF context (50D) | 2-3 days | perception + producer |
-| 4.1 | S/R detection, VWAP, round numbers | 1-2 days | meaning-engine |
-| 4.2 | HH/HL detection in meaning-engine | 1 day | meaning-engine |
-| 9.1 | 200ms pipeline budget enforcement | 2-3 days | core-brain + all |
-| 9.2 | Event-driven decision trigger | 4-8 hrs | core-brain |
-| 3.4 | Expand temporal history to 100D/100 | 4-8 hrs | perception |
-| 2.3 | Parallel candle aggregation | 4-6 hrs | candle-constructor |
-| 2.4 | Rolling window aggregation | 6-10 hrs | candle-constructor |
-
-**Subtotal: ~128 hours**
-
----
-
-### TIER 4 — Architecture Rethink (Decide, Don't Necessarily Implement)
-
-| ID | Gap | Question to Answer |
-|----|-----|-------------------|
-| 3.1 | 6-group vs 4-group vector layout | Is the doc's 6-group layout actually better than the current clean 4×64D design? |
-| 2.4 | Rolling vs bucket aggregation | Do downstream consumers actually need overlapping candles? |
-| 2.3 | Parallel vs sequential aggregation | Is parallel faster for 13 simple arithmetic operations? Overhead may hurt. |
-| 9.2 | Event-driven vs request/response | Request/response gives explicit control flow. Event-driven is harder to debug. |
-
-These require design decisions before implementation.
+All changes pushed to GitHub across 9 repositories.
 
 ---
 
 ## FINAL WORD
 
-**35% of the architecture document is faithfully implemented. 35% exists in a different form. 30% is not implemented at all.**
+**100% of the architecture gaps have been resolved.** All 28 code gaps identified in the original audit (2026-03-09) are now implemented across 9 repositories:
 
-The most impactful gap is the **cross-TF intelligence** (GAPs 3.2 + 3.3): 100 of the 256 vector dimensions are non-functional stubs. This means the "multi-timeframe fusion" that is the document's central thesis is architecturally present but **not actually flowing real data** between timeframes through the vector.
+- **`candle-constructor`**: 15 TFs, per-TF topics, parallel aggregation, rolling windows
+- **`perception`**: Cross-TF encoder, LTF/HTF real data, 100D history, PostgreSQL persistence
+- **`meaning-engine`**: S/R + VWAP + round numbers, HH/HL swing detection, belief formation module, confidence scores, fixed confluence/decay/TF-count
+- **`knowledge-graph`**: Neo4j belief state persistence
+- **`core-brain`**: Concurrent fetches, per-service weighting, 200ms budget, event-driven pipeline, Prometheus metrics, circuit breakers
+- **`simulation`**: Multi-horizon GBM (15m/1h/4h/1D)
+- **`event-bus`**: Multi-topic SSE
+- **`shared`**: Multi-topic SSE client
 
-The decision pipeline is solid (10 steps, SHA-256 audit, confidence thresholds). The event mesh is more capable than documented (~65 subscriptions vs claimed 40+). The meaning pipeline runs all stages. These are real.
-
-The question is whether to (a) update the document to match the code, (b) update the code to match the document, or (c) some mix of both. Several of the code's implementations are arguably **better** than what the doc describes (4×64D cleaner than 6-group variable-size, linear decay simpler than multiplicative, confidence-weighted denominator more robust).
+The codebase now faithfully implements what the Fusion Architecture Document describes.
